@@ -1,0 +1,16 @@
+[package]
+name = "editor"
+version = "0.1.0"
+authors = ["iLLusion of Reality"]
+edition = "2024"
+
+[dependencies]
+engine = { path = "../engine" }
+render = { path = "../render" }
+ecs = { path = "../ecs" }
+anyhow = "1.0"
+log = "0.4"
+winit = "0.30"
+toml = "1.0"
+glam = {version = "0.33.2", features = ["serde"]}
+serde = {version = "1.0", features=["derive"]}

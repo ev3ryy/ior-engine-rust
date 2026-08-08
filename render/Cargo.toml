@@ -1,0 +1,30 @@
+[package]
+name = "render"
+version = "0.1.0"
+authors = ["iLLusion of Reality"]
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["tokio-runtime"]
+tokio-runtime = ["tokio/rt", "tokio/sync", "tokio/macros", "tokio/fs"]
+
+[dependencies]
+asset = {path="../asset"}
+shared = {path="../shared"}
+anyhow = "1.0"
+log = "0.4"
+wgpu = "30.0"
+rkyv = "0.8"
+bytemuck = { version = "1.24", features = ["derive"] }
+glam = {version = "0.33.2", features = ["bytemuck"]}
+tobj = { version = "4.0.4", default-features = false, features = ["async"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+tokio = { version = "1", features = ["sync", "fs"], optional = true }
+
+[build-dependencies]
+anyhow = "1.0"
+fs_extra = "1.2"
+glob = "0.3"

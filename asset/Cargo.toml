@@ -1,0 +1,23 @@
+[package]
+name = "asset"
+version = "0.1.0"
+authors = ["iLLusion of Reality"]
+edition = "2024"
+
+[features]
+default = ["tokio-runtime"]
+tokio-runtime = ["tokio/rt", "tokio/sync", "tokio/macros"]
+
+[dependencies]
+anyhow = "1.0"
+dashmap = "6.2.1"
+fnv = "1.0"
+log = "0.4"
+parking_lot = "0.12"
+thiserror = "2.0.19"
+rkyv = "0.8.17"
+memmap2 = "0.9.11"
+parcode = "0.6.1"
+notify = "8.2.0"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["sync"], optional = true }

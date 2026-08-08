@@ -1,0 +1,12 @@
+[package]
+name = "app"
+version = "0.1.0"
+authors = ["iLLusion of Reality"]
+edition = "2024"
+
+[dependencies]
+engine = { path = "../engine" }
+editor = { path = "../editor" }
+# game = { path = "../game" }
+anyhow = "1.0"
+env_logger = "0.11.11"

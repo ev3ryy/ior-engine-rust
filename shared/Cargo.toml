@@ -1,0 +1,9 @@
+[package]
+name = "shared"
+version = "0.1.0"
+authors = ["iLLusion of Reality"]
+edition = "2024"
+
+[dependencies]
+glam = "0.33.3"
+rkyv = { version ="0.8.18"}
