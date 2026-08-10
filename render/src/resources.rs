@@ -13,16 +13,16 @@ fn resource_path(file_name: &str) -> PathBuf {
     #[cfg(debug_assertions)]
     {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("res")
+            .join("../res")
             .join(file_name)
     }
 
     #[cfg(not(debug_assertions))]
     {
         std::env::current_exe()
-            .expect("Не удалось получить путь к исполняемому файлу")
+            .expect("failed get path to executable file")
             .parent()
-            .expect("Не удалось получить родительскую директорию")
+            .expect("failed get root directory")
             .join("res")
             .join(file_name)
     }
@@ -37,10 +37,10 @@ pub async fn load_string(file_name: &str) -> anyhow::Result<String> {
 pub async fn load_binary(file_name: &str) -> anyhow::Result<Vec<u8>> {
     let path = resource_path(file_name);
 
-    log::info!("Пытаюсь загрузить файл по пути: {:?}", path);
+    log::info!("trying load file from path: {:?}", path);
 
     let data = std::fs::read(&path)
-        .map_err(|e| anyhow::anyhow!("Не удалось прочитать файл {:?}: {}", path, e))?;
+        .map_err(|e| anyhow::anyhow!("failed to load file {:?}: {}", path, e))?;
 
     Ok(data)
 }

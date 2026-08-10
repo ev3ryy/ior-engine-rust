@@ -9,10 +9,8 @@ use std::time::{Instant, Duration};
 use tokio::sync::{watch, broadcast};
 use notify::{Watcher};
 
-#[cfg(debug_assertions)]
 static PATH_REGISTRY: OnceLock<DashMap<AssetId, String>> = OnceLock::new();
 
-#[cfg(debug_assertions)]
 impl AssetId {
     pub fn path(&self) -> String {
         PATH_REGISTRY
@@ -332,58 +330,47 @@ impl AssetServer {
             watcher.watch(&path_buf, notify::RecursiveMode::Recursive).unwrap();
             log::info!("Hot-Reloading watcher started for {:?}", path_buf);
 
+            let mut last_run = std::time::Instant::now() - std::time::Duration::from_secs(5);
+
             for res in rx {
                 match res {
                     Ok(event) => {
-                        if let notify::EventKind::Access(_) = event.kind {
+                        if !event.kind.is_modify() && !event.kind.is_create() { continue; }
+                        
+                        if last_run.elapsed() < std::time::Duration::from_secs(2) {
                             continue;
                         }
 
                         for path in event.paths {
                             if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                                
-                                // only debug "cargo run"
-                                #[cfg(debug_assertions)]
                                 if file_name.ends_with(".glb") {
-                                    log::info!("Source: {}, run Cooker...", file_name);
+                                    log::info!("File modified: {}, running Cooker...", file_name);
+                                    
+                                    let cooker_path = std::path::PathBuf::from("target/release/cooker");
                                     
                                     let glb_path = path.to_str().unwrap();
                                     let bin_path = path.with_extension("bin");
                                     
-                                    let status = std::process::Command::new("cargo")
-                                        .arg("run")
-                                        .arg("-q")
-                                        .arg("-p")
-                                        .arg("cooker")
-                                        .arg("--")
+                                    let status = std::process::Command::new(&cooker_path)
                                         .arg(glb_path)
                                         .arg(bin_path.to_str().unwrap())
                                         .status();
                                         
-                                    match status {
-                                        Ok(st) if st.success() => {
-                                            log::info!("Success saved in {}", bin_path.file_name().unwrap().to_str().unwrap());
+                                    if status.is_ok() {
+                                        log::info!("Bake successful!");
+                                        last_run = std::time::Instant::now();
+                                        
+                                        let id = AssetId::from_path(file_name);
+                                        let stores = server.stores.read().unwrap();
+                                        for store in stores.values() {
+                                            store.remove(id); 
                                         }
-                                        _ => log::error!("Error: baking asset"),
+                                        let _ = event_sender.send(AssetEvent::Unloaded { 
+                                            type_id: std::any::TypeId::of::<()>(),
+                                            id,
+                                        });
                                     }
-                                    continue;
                                 }
-
-                                let id = AssetId::from_path(file_name);
-                                log::info!("Asset changed on disk: {}", file_name);
-
-                                // sleep in background
-                                std::thread::sleep(std::time::Duration::from_millis(100));
-
-                                let stores = server.stores.read().unwrap();
-                                for store in stores.values() {
-                                    store.remove(id); 
-                                }
-
-                                let _ = event_sender.send(AssetEvent::Unloaded { 
-                                    type_id: std::any::TypeId::of::<()>(),
-                                    id,
-                                });
                             }
                         }
                     }

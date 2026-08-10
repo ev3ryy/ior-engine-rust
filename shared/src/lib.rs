@@ -22,7 +22,19 @@ pub struct BakedMaterial {
 }
 
 #[derive(Archive, Deserialize, Serialize, Debug, PartialEq)]
+pub struct BakedNode {
+    pub name: String,
+    pub meshes: Vec<usize>, 
+    pub position: [f32; 3],
+    pub rotation: [f32; 4],
+    pub scale: [f32; 3],
+    pub children: Vec<usize>,
+}
+
+#[derive(Archive, Deserialize, Serialize, Debug, PartialEq)]
 pub struct BakedModel {
     pub meshes: Vec<BakedMesh>,
     pub materials: Vec<BakedMaterial>,
+    pub nodes: Vec<BakedNode>,
+    pub roots: Vec<usize>,
 }

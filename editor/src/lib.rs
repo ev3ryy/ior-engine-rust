@@ -1,32 +1,38 @@
 mod settings;
+pub mod ui;
 pub use settings::EditorConfig;
 
 
 use engine::app::Application;
 use engine::camera::{Camera, CameraController, CameraMovement};
-use ecs::{spawn_instance_grid, World};
+use ecs::World;
 use ecs::serialization::{save_world, load_world};
 use winit::event::{WindowEvent, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
 pub struct Editor {
     config: EditorConfig,
+    models_to_load: Vec<String>,
 }
 
 impl Editor {
     pub fn new(config: EditorConfig) -> Self {
-        Self { config }
+        Self { config, models_to_load: Vec::new() }
     }
 }
 
 impl Application for Editor {
-    fn on_init(&mut self, world: &mut World, camera: &mut Camera) {
+    fn on_init(
+        &mut self, 
+        world: &mut World, 
+        camera: &mut Camera, 
+        _asset_server: &std::sync::Arc<asset::AssetServer>
+    ) {
         self.config = EditorConfig::load("editor.cfg");
-        spawn_instance_grid(world, self.config.initial_grid_rows, self.config.initial_grid_spacing);
-        
         camera.eye = self.config.camera_eye;
         camera.target = self.config.camera_target;
         camera.fovy = self.config.camera_fovy;
+        log::info!("Editor initialized with empty world.");
     }
 
     fn on_window_event(
@@ -78,6 +84,10 @@ impl Application for Editor {
                         log::error!("Failed to load world: {}", e);
                     } else {
                         log::info!("World loaded from {}", self.config.world_save_path);
+                        
+                        world.inner.each::<&ecs::components::ModelComponent>(|model_comp| {
+                            self.models_to_load.push(model_comp.id.path()); 
+                        });
                     }
                 }
                 
@@ -85,5 +95,13 @@ impl Application for Editor {
             }
             _ => false,
         }
+    }
+
+    fn on_ui(&mut self, ctx: &egui::Context, world: &mut World, camera: &mut Camera, metrics: &engine::EngineMetrics, load_requests: &mut Vec<String>) {
+        if !self.models_to_load.is_empty() {
+            load_requests.append(&mut self.models_to_load);
+        }
+
+        ui::draw_editor_ui(ctx, world, camera, metrics, load_requests);
     }
 }

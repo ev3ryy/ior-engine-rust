@@ -5,6 +5,8 @@ authors = ["iLLusion of Reality"]
 edition = "2024"
 
 [dependencies]
+asset = {path = "../asset"}
+shared = {path = "../shared"}
 flecs_ecs = "0.2.2"
 parcode = "0.6.1"
 memmap2 = "0.9.11"

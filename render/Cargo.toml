@@ -18,6 +18,8 @@ anyhow = "1.0"
 log = "0.4"
 wgpu = "30.0"
 rkyv = "0.8"
+egui = "0.36"
+egui-wgpu = "0.36"
 bytemuck = { version = "1.24", features = ["derive"] }
 glam = {version = "0.33.2", features = ["bytemuck"]}
 tobj = { version = "4.0.4", default-features = false, features = ["async"] }

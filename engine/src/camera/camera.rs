@@ -1,6 +1,6 @@
 use glam::{Mat4, Vec3, camera};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Camera {
     pub eye: Vec3,
     pub target: Vec3,

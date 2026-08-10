@@ -1,12 +1,9 @@
 use glam::{Mat4, Vec4};
-use std::iter;
 use std::sync::Arc;
 
 pub mod model;
 pub mod resources;
 pub mod texture;
-
-use model::{DrawModel};
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -52,7 +49,7 @@ pub struct Renderer {
     pub device: Arc<wgpu::Device>,
     pub queue: Arc<wgpu::Queue>,
     pub texture_bind_group_layout: Arc<wgpu::BindGroupLayout>,
-    config: wgpu::SurfaceConfiguration,
+    pub config: wgpu::SurfaceConfiguration,
     is_surface_configured: bool,
     render_pipeline: wgpu::RenderPipeline,
     camera_buffer: wgpu::Buffer,
@@ -61,6 +58,7 @@ pub struct Renderer {
     instance_buffer: wgpu::Buffer,
     instance_buffer_capacity: usize,
     depth_texture: texture::Texture,
+    pub egui_renderer: egui_wgpu::Renderer,
 }
 
 impl Renderer {
@@ -128,6 +126,8 @@ impl Renderer {
             desired_maximum_frame_latency: 2,
             color_space: wgpu::SurfaceColorSpace::Auto,
         };
+
+        let egui_renderer = egui_wgpu::Renderer::new(&device, config.format, egui_wgpu::RendererOptions::default());
 
         let texture_bind_group_layout =
             Arc::new(device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -230,7 +230,7 @@ impl Renderer {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
+                cull_mode: None, //Some(wgpu::Face::Back),
                 polygon_mode: wgpu::PolygonMode::Fill,
                 unclipped_depth: false,
                 conservative: false,
@@ -264,6 +264,7 @@ impl Renderer {
             instance_buffer,
             instance_buffer_capacity: initial_capacity,
             depth_texture,
+            egui_renderer,
         })
     }
 
@@ -299,10 +300,29 @@ impl Renderer {
         );
     }
 
-    pub fn render(&mut self, model: &model::Model, instance_count: u32) -> anyhow::Result<()> {
+    pub fn render_batches(
+        &mut self,
+        batches: &[(Arc<model::Model>, usize, Vec<InstanceRaw>)],
+        egui_primitives: &[egui::ClippedPrimitive],
+        egui_screen_descriptor: &egui_wgpu::ScreenDescriptor,
+    ) -> anyhow::Result<()> {
         if !self.is_surface_configured {
             return Ok(());
         }
+
+        let mut all_instances = Vec::new();
+        let mut draw_calls = Vec::new();
+        let mut current_offset = 0;
+
+        for (model, mesh_idx, instances) in batches {
+            let count = instances.len() as u32;
+            all_instances.extend_from_slice(instances);
+
+            draw_calls.push((model.clone(), *mesh_idx, current_offset..(current_offset + count)));
+            current_offset += count;
+        }
+
+        self.upload_instances(&all_instances);
 
         let output = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(surface_texture) => surface_texture,
@@ -327,6 +347,14 @@ impl Renderer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Render Encoder"),
             });
+
+        self.egui_renderer.update_buffers(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            egui_primitives,
+            egui_screen_descriptor,
+        );
 
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -358,16 +386,62 @@ impl Renderer {
                 multiview_mask: None,
             });
 
-            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            // binding pipeline
             render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.draw_model_instanced(
-                model,
-                0..instance_count,
-                &self.camera_bind_group,
+            
+            // binding instance buffer
+            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            
+            // binding camera buffer
+            render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
+
+            // drawing mesh from model
+            for (model, mesh_idx, range) in draw_calls {
+                if mesh_idx >= model.meshes.len() { continue; }
+
+                let mesh = &model.meshes[mesh_idx];
+                let material = &model.materials[mesh.material];
+                
+                render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                
+                // bingind texture/material
+                render_pass.set_bind_group(0, &material.bind_group, &[]);
+                
+                render_pass.draw_indexed(0..mesh.num_elements, 0, range.clone());
+            }
+        }
+
+        {
+            let egui_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Egui Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                multiview_mask: None,
+            });
+
+            let mut static_egui_pass = unsafe {
+                std::mem::transmute::<wgpu::RenderPass<'_>, wgpu::RenderPass<'static>>(egui_pass)
+            };
+
+            self.egui_renderer.render(
+                &mut static_egui_pass, 
+                egui_primitives, 
+                egui_screen_descriptor
             );
         }
 
-        self.queue.submit(iter::once(encoder.finish()));
+        self.queue.submit(std::iter::once(encoder.finish()));
         self.queue.present(output);
 
         Ok(())
