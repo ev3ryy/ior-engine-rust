@@ -45,20 +45,27 @@ impl InstanceRaw {
 }
 
 pub struct Renderer {
-    surface: wgpu::Surface<'static>,
-    pub device: Arc<wgpu::Device>,
-    pub queue: Arc<wgpu::Queue>,
-    pub texture_bind_group_layout: Arc<wgpu::BindGroupLayout>,
-    pub config: wgpu::SurfaceConfiguration,
-    is_surface_configured: bool,
-    render_pipeline: wgpu::RenderPipeline,
-    camera_buffer: wgpu::Buffer,
-    camera_bind_group: wgpu::BindGroup,
+    pub egui_renderer: egui_wgpu::Renderer,
+    pub depth_texture: texture::Texture,
+    
     #[allow(dead_code)]
     instance_buffer: wgpu::Buffer,
     instance_buffer_capacity: usize,
-    depth_texture: texture::Texture,
-    pub egui_renderer: egui_wgpu::Renderer,
+    camera_bind_group: wgpu::BindGroup,
+    camera_buffer: wgpu::Buffer,
+    render_pipeline: wgpu::RenderPipeline,
+    
+    is_surface_configured: bool,
+    pub config: wgpu::SurfaceConfiguration,
+    pub texture_bind_group_layout: Arc<wgpu::BindGroupLayout>,
+    
+    pub queue: Arc<wgpu::Queue>,
+    pub device: Arc<wgpu::Device>,
+
+    surface: wgpu::Surface<'static>,
+    
+    #[allow(dead_code)]
+    instance: wgpu::Instance,
 }
 
 impl Renderer {
@@ -252,19 +259,20 @@ impl Renderer {
         });
 
         Ok(Self {
-            surface,
-            device,
-            queue,
-            texture_bind_group_layout,
-            config,
-            is_surface_configured: false,
-            render_pipeline,
-            camera_buffer,
-            camera_bind_group,
+            egui_renderer,
+            depth_texture,
             instance_buffer,
             instance_buffer_capacity: initial_capacity,
-            depth_texture,
-            egui_renderer,
+            camera_bind_group,
+            camera_buffer,
+            render_pipeline,
+            is_surface_configured: false,
+            config,
+            texture_bind_group_layout,
+            queue,
+            device,
+            surface,
+            instance,
         })
     }
 
@@ -429,10 +437,8 @@ impl Renderer {
                 timestamp_writes: None,
                 multiview_mask: None,
             });
-
-            let mut static_egui_pass = unsafe {
-                std::mem::transmute::<wgpu::RenderPass<'_>, wgpu::RenderPass<'static>>(egui_pass)
-            };
+            
+            let mut static_egui_pass = egui_pass.forget_lifetime();
 
             self.egui_renderer.render(
                 &mut static_egui_pass, 

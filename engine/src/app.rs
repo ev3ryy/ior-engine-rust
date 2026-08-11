@@ -4,6 +4,7 @@ use crate::EngineMetrics;
 use winit::{event::WindowEvent};
 
 pub trait Application {
+    #[allow(unused_variables)]
     fn on_init(&mut self, _world: &mut World, _camera: &mut Camera, asset_server: &std::sync::Arc<asset::AssetServer>) {}
     
     fn on_update(&mut self, _world: &mut World, _camera: &mut Camera, _camera_controller: &mut CameraController) {}
@@ -20,5 +21,6 @@ pub trait Application {
         false
     }
 
+    #[allow(unused_variables)]
     fn on_ui(&mut self, ctx: &egui::Context, world: &mut World, camera: &mut Camera, metrics: &EngineMetrics, load_requests: &mut Vec<String>) {}
 }

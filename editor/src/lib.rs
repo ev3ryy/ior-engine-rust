@@ -24,7 +24,7 @@ impl Editor {
 impl Application for Editor {
     fn on_init(
         &mut self, 
-        world: &mut World, 
+        _world: &mut World, 
         camera: &mut Camera, 
         _asset_server: &std::sync::Arc<asset::AssetServer>
     ) {

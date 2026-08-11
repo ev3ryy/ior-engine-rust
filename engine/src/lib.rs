@@ -26,25 +26,26 @@ pub struct EngineConfig {
 struct EngineRunner<A: Application> {
     app: A,
     config: EngineConfig,
-    renderer: Option<Renderer>,
-    window: Option<Arc<Window>>,
+    
+    egui_state: Option<egui_winit::State>,
+    egui_ctx: egui::Context,
+    
+    loaded_models: std::collections::HashSet<String>,
+    asset_events: tokio::sync::broadcast::Receiver<AssetEvent>,
+    asset_server: Arc<AssetServer>,
+
     world: World,
     camera: Camera,
     camera_controller: CameraController,
-
-    rt: Arc<Runtime>,
-
-    loaded_models: std::collections::HashSet<String>,
-    asset_server: Arc<AssetServer>,
-    asset_events: tokio::sync::broadcast::Receiver<AssetEvent>,
-
-    egui_ctx: egui::Context,
-    egui_state: Option<egui_winit::State>,
-
+    
     metrics: EngineMetrics,
     last_frame_time: std::time::Instant,
     frames_this_second: u32,
     last_fps_update: std::time::Instant,
+
+    rt: Arc<Runtime>,
+    renderer: Option<Renderer>,
+    window: Option<Arc<Window>>,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -346,21 +347,26 @@ pub fn run<A: Application>(config: EngineConfig, app: A) -> anyhow::Result<()> {
     let mut runner = EngineRunner {
         app,
         config,
-        renderer: None,
-        window: None,
+        
+        egui_state,
+        egui_ctx,
+        
+        loaded_models,
+        asset_events,
+        asset_server,
+        
         world,
         camera,
         camera_controller,
-        rt,
-        asset_server,
-        asset_events,
-        loaded_models,
-        egui_ctx,
-        egui_state,
+        
         metrics: EngineMetrics::default(),
         last_frame_time: std::time::Instant::now(),
         frames_this_second: 0,
         last_fps_update: std::time::Instant::now(),
+
+        rt,
+        renderer: None,
+        window: None,
     };
     
     event_loop.run_app(&mut runner)?;
