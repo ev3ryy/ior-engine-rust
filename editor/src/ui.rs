@@ -1,5 +1,5 @@
 use egui::Context;
-use ecs::{World, Position, Rotation, Scale, ModelComponent};
+use ecs::{World, LightType};
 use engine::{EngineMetrics, camera::Camera};
 
 pub fn draw_editor_ui(ctx: &Context, world: &mut World, camera: &mut Camera, metrics: &EngineMetrics, load_requests: &mut Vec<String>) {
@@ -41,45 +41,86 @@ pub fn draw_editor_ui(ctx: &Context, world: &mut World, camera: &mut Camera, met
         .default_size([300.0, 500.0])
         .show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
-                let mut entity_id = 0;
-                
-                world.inner.each::<(&mut Position, &mut Rotation, &mut Scale, &ModelComponent)>(
-                    |(pos, _rot, scale, model)| {
-                        let header_text = format!("Entity {} (Mesh {})", entity_id, model.mesh_index);
-                        
-                        egui::CollapsingHeader::new(header_text)
-                            .default_open(true)
-                            .show(ui, |ui| {
-                                // Transform (Position)
-                                ui.label(egui::RichText::new("Position").strong());
-                                ui.horizontal(|ui| {
-                                    ui.add(egui::DragValue::new(&mut pos.0.x).speed(0.1).prefix("X: "));
-                                    ui.add(egui::DragValue::new(&mut pos.0.y).speed(0.1).prefix("Y: "));
-                                    ui.add(egui::DragValue::new(&mut pos.0.z).speed(0.1).prefix("Z: "));
-                                });
-                                
-                                // Transform (Scale)
-                                ui.label(egui::RichText::new("Scale").strong());
-                                ui.horizontal(|ui| {
-                                    ui.add(egui::DragValue::new(&mut scale.0.x).speed(0.1).prefix("X: "));
-                                    ui.add(egui::DragValue::new(&mut scale.0.y).speed(0.1).prefix("Y: "));
-                                    ui.add(egui::DragValue::new(&mut scale.0.z).speed(0.1).prefix("Z: "));
-                                });
-                                
-                                // Asset ID
-                                ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new("Model ID:").strong());
-                                    ui.label(format!("{:?}", model.id.path()));
-                                });
+                let mut entity_count = 0;
+                world.each_transform_mut(|entity_id, pos, _rot, scale| {
+                    
+                    let has_model = world.has_model(entity_id);
+                    let has_light = world.has_light(entity_id);
+                    
+                    if !has_model && !has_light { return; }
+
+                    let header_text = format!("Entity {}", entity_id);
+                    
+                    egui::CollapsingHeader::new(header_text)
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            
+                            ui.label(egui::RichText::new("Transform").strong());
+                            ui.horizontal(|ui| {
+                                ui.add(egui::DragValue::new(&mut pos.0.x).speed(0.1).prefix("X: "));
+                                ui.add(egui::DragValue::new(&mut pos.0.y).speed(0.1).prefix("Y: "));
+                                ui.add(egui::DragValue::new(&mut pos.0.z).speed(0.1).prefix("Z: "));
                             });
-                        
-                        ui.add_space(5.0);
-                        entity_id += 1;
-                    }
-                );
+                            
+                            ui.horizontal(|ui| {
+                                ui.add(egui::DragValue::new(&mut scale.0.x).speed(0.1).prefix("S_X: "));
+                                ui.add(egui::DragValue::new(&mut scale.0.y).speed(0.1).prefix("S_Y: "));
+                                ui.add(egui::DragValue::new(&mut scale.0.z).speed(0.1).prefix("S_Z: "));
+                            });
+
+                            if has_model {
+                                world.get_model(entity_id, |model| {
+                                    ui.separator();
+                                    ui.label(egui::RichText::new("Mesh Component").strong());
+                                    ui.horizontal(|ui| {
+                                        ui.label("Model ID:");
+                                        ui.label(format!("{:?}", model.id.path()));
+                                    });
+                                    ui.label(format!("Mesh Index: {}", model.mesh_index));
+                                });
+                            }
+
+                            if has_light {
+                                world.get_light_mut(entity_id, |light| {
+                                    ui.separator();
+                                    ui.label(egui::RichText::new("Light Settings").strong());
+                                    
+                                    ui.horizontal(|ui| {
+                                        ui.label("Color:");
+                                        let mut color = [light.color[0], light.color[1], light.color[2]];
+                                        ui.color_edit_button_rgb(&mut color);
+                                        light.color = color;
+                                    });
+
+                                    ui.add(egui::Slider::new(&mut light.intensity, 0.0..=1000.0).text("Intensity"));
+                                    
+                                    match light.light_type {
+                                        LightType::Point | LightType::Spot => {
+                                            ui.add(egui::Slider::new(&mut light.range, 0.1..=200.0).text("Range"));
+                                        },
+                                        _ => {}
+                                    }
+                                    
+                                    if let LightType::Spot = light.light_type {
+                                        let mut inner_deg = light.inner_angle.to_degrees();
+                                        let mut outer_deg = light.outer_angle.to_degrees();
+                                        
+                                        ui.add(egui::Slider::new(&mut inner_deg, 0.0..=90.0).text("Inner Cone"));
+                                        ui.add(egui::Slider::new(&mut outer_deg, 0.0..=90.0).text("Outer Cone"));
+                                        
+                                        light.inner_angle = inner_deg.to_radians();
+                                        light.outer_angle = outer_deg.to_radians().max(light.inner_angle + 0.01);
+                                    }
+                                });
+                            }
+                        });
+                    
+                    ui.add_space(5.0);
+                    entity_count += 1;
+                });
                 
-                if entity_id == 0 {
-                    ui.label(egui::RichText::new("No entities in the world.").italics());
+                if entity_count == 0 {
+                    ui.label(egui::RichText::new("No renderable entities in the world.").italics());
                 }
             });
         });

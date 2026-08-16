@@ -5,6 +5,116 @@ use std::env;
 use std::fs::File;
 use std::io::Write;
 
+struct MeshBuffer<'a> {
+    positions: &'a [[f32; 3]],
+    normals: &'a [[f32; 3]],
+    tex_coords: &'a [[f32; 2]],
+    indices: &'a [u32],
+    tangents: Vec<[f32; 4]>,
+}
+
+impl<'a> mikktspace::Geometry for MeshBuffer<'a> {
+    fn num_faces(&self) -> usize {
+        self.indices.len() / 3
+    }
+
+    fn num_vertices_of_face(&self, _face: usize) -> usize {
+        3
+    }
+
+    fn position(&self, face: usize, vert: usize) -> [f32; 3] {
+        let idx = self.indices[face * 3 + vert] as usize;
+        self.positions[idx]
+    }
+
+    fn normal(&self, face: usize, vert: usize) -> [f32; 3] {
+        let idx = self.indices[face * 3 + vert] as usize;
+        self.normals[idx]
+    }
+
+    fn tex_coord(&self, face: usize, vert: usize) -> [f32; 2] {
+        let idx = self.indices[face * 3 + vert] as usize;
+        self.tex_coords[idx]
+    }
+
+    fn set_tangent_encoded(&mut self, tangent: [f32; 4], face: usize, vert: usize) {
+        let idx = self.indices[face * 3 + vert] as usize;
+        self.tangents[idx] = tangent;
+    }
+}
+
+fn extract_or_save_texture(
+    texture: Option<gltf::Texture>,
+    default_name: &str,
+    out_dir: &std::path::Path,
+    images: &[gltf::image::Data],
+) -> String {
+    let Some(tex) = texture else {
+        let file_name = format!("default_{}.png", default_name);
+        let save_path = out_dir.join(&file_name);
+
+        if !save_path.exists() {
+            let color: [u8; 4] = match default_name {
+                "normal" => [128, 128, 255, 255],
+                "orm" => [255, 255, 0, 255],      // AO=1, Roughness=1, Metal=0
+                _ => [255, 255, 255, 255],
+            };
+            
+            println!("Generating fallback texture: {}", file_name);
+            image::save_buffer(
+                &save_path,
+                &color,
+                1, 1,
+                image::ColorType::Rgba8
+            ).unwrap_or_else(|e| panic!("Failed to save fallback texture {}: {}", file_name, e));
+        }
+        return file_name;
+    };
+
+    let source = tex.source();
+    let mat_name = source.name().unwrap_or("texture");
+
+    match source.source() {
+        gltf::image::Source::Uri { uri, .. } => uri.to_string(),
+        gltf::image::Source::View { .. } => {
+            let img_data = &images[source.index()];
+            
+            let ext = match img_data.format {
+                gltf::image::Format::R8G8B8A8 => "png",
+                gltf::image::Format::R8G8B8 => "jpg",
+                _ => "png",
+            };
+            
+            let file_name = format!("{}_{}.{}", mat_name, default_name, ext);
+            let save_path = out_dir.join(&file_name);
+
+            if !save_path.exists() {
+                let color_type = match img_data.format {
+                    gltf::image::Format::R8 => image::ColorType::L8,
+                    gltf::image::Format::R8G8 => image::ColorType::La8,
+                    gltf::image::Format::R8G8B8 => image::ColorType::Rgb8,
+                    gltf::image::Format::R8G8B8A8 => image::ColorType::Rgba8,
+                    gltf::image::Format::R16 => image::ColorType::L16,
+                    gltf::image::Format::R16G16 => image::ColorType::La16,
+                    gltf::image::Format::R16G16B16 => image::ColorType::Rgb16,
+                    gltf::image::Format::R16G16B16A16 => image::ColorType::Rgba16,
+                    other => panic!("Unsupported image format in GLB: {:?}", other),
+                };
+
+                println!("Extracting texture: {}", file_name);
+                image::save_buffer(
+                    &save_path,
+                    &img_data.pixels,
+                    img_data.width,
+                    img_data.height,
+                    color_type,
+                ).unwrap_or_else(|e| panic!("Failed to save texture {}: {}", file_name, e));
+            }
+            file_name
+        }
+    }
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
@@ -14,7 +124,7 @@ fn main() -> Result<()> {
     let input_path = &args[1];
     let output_path = &args[2];
 
-    println!("Baking file: {}", input_path);
+    println!("Baking file (PBR): {}", input_path);
 
     let (document, buffers, images) = gltf::import(input_path)
         .with_context(|| format!("failed to load glTF: {}", input_path))?;
@@ -26,50 +136,41 @@ fn main() -> Result<()> {
     let mut baked_materials = Vec::new();
     for material in document.materials() {
         let name = material.name().unwrap_or("DefaultMaterial").to_string();
-        
-        let mut diffuse_texture = "default.png".to_string();
-        if let Some(pbr) = material.pbr_metallic_roughness().base_color_texture() {
-            let tex = pbr.texture();
-            let source = tex.source();
+        let pbr = material.pbr_metallic_roughness();
 
-            match source.source() {
-                gltf::image::Source::Uri { uri, .. } => {
-                    diffuse_texture = uri.to_string();
-                }
-                gltf::image::Source::View { .. } => {
-                    let img_name = source.name().unwrap_or(&name);
-                    diffuse_texture = format!("{}_albedo.png", img_name);
-                    
-                    let save_path = out_dir.join(&diffuse_texture);
-                    
-                    if !save_path.exists() {
-                        let img_data = &images[source.index()];
-                        
-                        let color_type = match img_data.format {
-                            gltf::image::Format::R8 => image::ColorType::L8,
-                            gltf::image::Format::R8G8 => image::ColorType::La8,
-                            gltf::image::Format::R8G8B8 => image::ColorType::Rgb8,
-                            gltf::image::Format::R8G8B8A8 => image::ColorType::Rgba8,
-                            _ => panic!("Unsupported image format in GLB"),
-                        };
+        let base_color_factor = pbr.base_color_factor();
+        let metallic_factor = pbr.metallic_factor();
+        let roughness_factor = pbr.roughness_factor();
 
-                        println!("Extracting embedded texture: {}", diffuse_texture);
-                        
-                        image::save_buffer(
-                            &save_path,
-                            &img_data.pixels,
-                            img_data.width,
-                            img_data.height,
-                            color_type,
-                        ).expect("Failed to save extracted texture to disk");
-                    }
-                }
-            }
-        }
+        let diffuse_texture = extract_or_save_texture(
+            pbr.base_color_texture().map(|t| t.texture()),
+            "albedo",
+            out_dir,
+            &images,
+        );
+
+        let normal_texture = extract_or_save_texture(
+            material.normal_texture().map(|t| t.texture()),
+            "normal",
+            out_dir,
+            &images,
+        );
+
+        let orm_texture = extract_or_save_texture(
+            pbr.metallic_roughness_texture().map(|t| t.texture()),
+            "orm",
+            out_dir,
+            &images,
+        );
 
         baked_materials.push(BakedMaterial {
             name,
             diffuse_texture,
+            normal_texture,
+            orm_texture,
+            base_color_factor,
+            metallic_factor,
+            roughness_factor,
         });
     }
 
@@ -86,6 +187,25 @@ fn main() -> Result<()> {
             let positions = reader.read_positions().expect("No positions!").collect::<Vec<_>>();
             let normals = reader.read_normals().map(|i| i.collect()).unwrap_or(vec![[0.0, 1.0, 0.0]; positions.len()]);
             let tex_coords = reader.read_tex_coords(0).map(|i| i.into_f32().collect()).unwrap_or(vec![[0.0, 0.0]; positions.len()]);
+            let indices: Vec<u32> = reader.read_indices()
+                .map(|i| i.into_u32().collect())
+                .unwrap_or_else(|| (0..positions.len() as u32).collect());
+
+            let mut mesh_buffer = MeshBuffer {
+                positions: &positions,
+                normals: &normals,
+                tex_coords: &tex_coords,
+                indices: &indices,
+                tangents: vec![[1.0, 0.0, 0.0, 1.0]; positions.len()],
+            };
+
+            if reader.read_tangents().is_none() {
+                mikktspace::generate_tangents(&mut mesh_buffer);
+            } else if let Some(tangents_iter) = reader.read_tangents() {
+                for (i, t) in tangents_iter.enumerate() {
+                    mesh_buffer.tangents[i] = t;
+                }
+            }
 
             let mut vertices = Vec::with_capacity(positions.len());
             for i in 0..positions.len() {
@@ -93,13 +213,13 @@ fn main() -> Result<()> {
                     position: positions[i],
                     normal: normals[i],
                     tex_coords: tex_coords[i],
+                    tangent: mesh_buffer.tangents[i],
                 });
             }
 
-            let indices = reader.read_indices().map(|i| i.into_u32().collect()).unwrap_or_else(|| (0..vertices.len() as u32).collect());
             let material_id = primitive.material().index().unwrap_or(0);
-
             let baked_idx = baked_meshes.len();
+            
             baked_meshes.push(BakedMesh {
                 name: mesh_name.clone(),
                 vertices,
@@ -111,19 +231,51 @@ fn main() -> Result<()> {
         gltf_mesh_to_baked.insert(mesh.index(), prim_indices);
     }
 
+    let mut baked_lights = Vec::new();
+    let mut gltf_light_to_baked = HashMap::new();
+
     let mut baked_nodes = Vec::new();
     for node in document.nodes() {
         let (t, r, s) = node.transform().decomposed();
+        let meshes = node.mesh()
+            .and_then(|m| gltf_mesh_to_baked.get(&m.index()))
+            .cloned()
+            .unwrap_or_default();
         
-        let meshes = if let Some(mesh) = node.mesh() {
-            gltf_mesh_to_baked.get(&mesh.index()).cloned().unwrap_or_default()
-        } else {
-            Vec::new()
-        };
+        let mut light_idx = None;
+        if let Some(light) = node.light() {
+            let idx = light.index();
+            
+            if !gltf_light_to_baked.contains_key(&idx) {
+                let (light_type, inner, outer) = match light.kind() {
+                    gltf::khr_lights_punctual::Kind::Directional => 
+                        (shared::BakedLightType::Directional, 0.0, 0.0),
+                    gltf::khr_lights_punctual::Kind::Point => 
+                        (shared::BakedLightType::Point, 0.0, 0.0),
+                    gltf::khr_lights_punctual::Kind::Spot { inner_cone_angle, outer_cone_angle } => 
+                        (shared::BakedLightType::Spot, inner_cone_angle, outer_cone_angle),
+                };
+
+                let baked_light = shared::BakedLight {
+                    light_type,
+                    color: light.color(),
+                    intensity: light.intensity() / 100.0, 
+                    range: light.range().unwrap_or(100.0),
+                    inner_angle: inner,
+                    outer_angle: outer,
+                };
+                
+                let b_idx = baked_lights.len();
+                baked_lights.push(baked_light);
+                gltf_light_to_baked.insert(idx, b_idx);
+            }
+            light_idx = Some(*gltf_light_to_baked.get(&idx).unwrap());
+        }
         
         baked_nodes.push(BakedNode {
             name: node.name().unwrap_or("Node").to_string(),
             meshes,
+            light: light_idx,
             position: t,
             rotation: r,
             scale: s,
@@ -141,6 +293,7 @@ fn main() -> Result<()> {
     let baked_model = BakedModel {
         meshes: baked_meshes,
         materials: baked_materials,
+        lights: baked_lights,
         nodes: baked_nodes,
         roots,
     };
@@ -151,10 +304,11 @@ fn main() -> Result<()> {
     let mut file = File::create(output_path)?;
     file.write_all(&bytes)?;
 
-    println!("Success baking model: {} (Nodes: {}, Meshes: {})", 
+    println!("Success PBR baking: {} (Meshes: {}, Materials: {}, Lights: {})", 
         output_path, 
-        baked_model.nodes.len(),
-        baked_model.meshes.len()
+        baked_model.meshes.len(),
+        baked_model.materials.len(),
+        baked_model.lights.len()
     );
 
     Ok(())

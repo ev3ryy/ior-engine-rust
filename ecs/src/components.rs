@@ -26,6 +26,23 @@ pub struct ModelComponent {
     pub mesh_index: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Archive, Serialize, Deserialize)]
+#[repr(u32)]
+pub enum LightType {
+    Directional = 0,
+    Point = 1,
+    Spot = 2,
+}
+
+#[derive(Component, Debug, Clone, Archive, Serialize, Deserialize)]
+pub struct LightComponent {
+    pub light_type: LightType,
+    pub color: [f32; 3],
+    pub intensity: f32,
+    pub range: f32,
+    pub inner_angle: f32, // radians
+    pub outer_angle: f32, // radians
+}
 // tags
 #[derive(Component, Debug, Clone, Copy)]
 pub struct Static; // entity doesn`t move

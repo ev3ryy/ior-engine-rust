@@ -7,17 +7,24 @@ use engine::app::Application;
 use engine::camera::{Camera, CameraController, CameraMovement};
 use ecs::World;
 use ecs::serialization::{save_world, load_world};
-use winit::event::{WindowEvent, KeyEvent};
+use winit::event::{WindowEvent, KeyEvent, ElementState, MouseButton, MouseScrollDelta};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
 pub struct Editor {
     config: EditorConfig,
     models_to_load: Vec<String>,
+    is_rmb_pressed: bool,
+    last_cursor_pos: Option<(f64, f64)>,
 }
 
 impl Editor {
     pub fn new(config: EditorConfig) -> Self {
-        Self { config, models_to_load: Vec::new() }
+        Self { 
+            config, 
+            models_to_load: Vec::new(),
+            is_rmb_pressed: false,
+            last_cursor_pos: None,
+        }
     }
 }
 
@@ -89,10 +96,55 @@ impl Application for Editor {
                             self.models_to_load.push(model_comp.id.path()); 
                         });
                     }
+
+                    self.config = EditorConfig::load("editor.cfg");
                 }
                 
                 true
             }
+
+            WindowEvent::MouseInput { state, button: MouseButton::Right, .. } => {
+                self.is_rmb_pressed = *state == ElementState::Pressed;
+                false
+            }
+
+            WindowEvent::CursorMoved { position, .. } => {
+                let mut consumed = false;
+                if self.is_rmb_pressed {
+                    if let Some((last_x, last_y)) = self.last_cursor_pos {
+                        let dx = (position.x - last_x) as f32;
+                        let dy = (position.y - last_y) as f32;
+                        camera_controller.apply_movement(CameraMovement::Rotate { dx, dy });
+                    }
+                    consumed = true;
+                }
+                self.last_cursor_pos = Some((position.x, position.y));
+                consumed
+            }
+
+            WindowEvent::MouseWheel { delta, .. } => {
+                match delta {
+                    MouseScrollDelta::PixelDelta(pos) => {
+                        // Плавный скролл тачпадом -> Вращение камеры
+                        // Примечание: Умножаем на 0.5 для сглаживания. Знак минус может 
+                        // понадобиться поменять, в зависимости от настроек Natural Scrolling в ОС.
+                        let dx = pos.x as f32 * 0.5;
+                        let dy = -pos.y as f32 * 0.5;
+                        camera_controller.apply_movement(CameraMovement::Rotate { dx, dy });
+                    }
+                    MouseScrollDelta::LineDelta(_x, y) => {
+                        // Дискретный скролл колесиком мыши -> Зум
+                        camera_controller.apply_movement(CameraMovement::Zoom(*y * 20.0));
+                    }
+                }
+                false
+            }
+
+            WindowEvent::PinchGesture { delta, .. } => {
+                camera_controller.apply_movement(CameraMovement::Zoom(*delta as f32 * 3000.0));
+                false
+            }
+
             _ => false,
         }
     }

@@ -6,6 +6,7 @@ use tokio::runtime::Runtime;
 
 use app::Application;
 use render::{Renderer};
+use render::light::LightUniform;
 use asset::{AssetEvent, AssetServer};
 use ecs::World;
 use camera::{Camera, CameraController};
@@ -67,7 +68,7 @@ impl<A: Application> EngineRunner<A> {
         
         let device = renderer.device.clone();
         let queue = renderer.queue.clone();
-        let layout = renderer.texture_bind_group_layout.clone();
+        let layout = renderer.material_bind_group_layout.clone();
         let server = self.asset_server.clone();
         let file_name_owned = file_name.to_string();
 
@@ -81,7 +82,7 @@ impl<A: Application> EngineRunner<A> {
                     &device,
                     &queue,
                     &layout,
-                    |tex_name| {
+                    |tex_name, is_srgb| {
                         let tex_name = tex_name.to_string();
                         let dev = device.clone();
                         let q = queue.clone();
@@ -90,7 +91,7 @@ impl<A: Application> EngineRunner<A> {
                         async move {
                             srv.load(asset::AssetId::from_path(&tex_name), move || async move {
                                 let data = render::resources::load_binary(&tex_name).await?;
-                                let tex = render::texture::Texture::from_bytes(&dev, &q, &data, &tex_name)?;
+                                let tex = render::texture::Texture::from_bytes(&dev, &q, &data, &tex_name, is_srgb)?;
                                 Ok(tex) 
                             }).await.map_err(|e| anyhow::anyhow!("Asset load error: {}", e)) 
                         }
@@ -172,6 +173,8 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                 self.last_frame_time = now;
                 self.frames_this_second += 1;
 
+                let dt = self.metrics.frame_time_ms / 1000.0;
+
                 if now.duration_since(self.last_fps_update).as_secs_f32() >= 1.0 {
                     self.metrics.fps = self.frames_this_second as f32;
                     self.frames_this_second = 0;
@@ -205,7 +208,7 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                 self.app.on_update(&mut self.world, &mut self.camera, &mut self.camera_controller);
 
                 // 2. engine: update camera matrices
-                self.camera_controller.update_camera(&mut self.camera);
+                self.camera_controller.update_camera(&mut self.camera, dt);
                 let view_proj = self.camera.view_projection_matrix();
  
                 if let Some(renderer) = &mut self.renderer {
@@ -269,17 +272,43 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                 }
 
                 // 3. engine: collect data to ecs
+                let mut light_uniforms = Vec::new();
+
+                self.world.each_light(|pos, rot, light| {
+                    let forward = rot.0 * glam::Vec3::Z;
+                    
+                    let light_type = match light.light_type {
+                        ecs::LightType::Directional => 0,
+                        ecs::LightType::Point => 1,
+                        ecs::LightType::Spot => 2,
+                    };
+                    
+                    light_uniforms.push(LightUniform {
+                        position: pos.0.into(),
+                        light_type,
+                        color: light.color,
+                        intensity: light.intensity,
+                        direction: forward.into(),
+                        range: light.range,
+                        inner_cone_cos: light.inner_angle.cos(),
+                        outer_cone_cos: light.outer_angle.cos(),
+                        padding: [0.0; 2],
+                    });
+                });
+
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.upload_lights(&light_uniforms); 
+                }
+
                 let mut batches: std::collections::HashMap<(asset::AssetId, usize), Vec<render::InstanceRaw>> = std::collections::HashMap::new();
 
-                self.world.inner.each::<(&ecs::Position, &ecs::Rotation, &ecs::Scale, &ecs::ModelComponent)>(
-                    |(pos, rot, scale, model_comp)| {
-                        let model_mat = glam::Mat4::from_scale_rotation_translation(scale.0, rot.0, pos.0);
+                self.world.each_model(|pos, rot, scale, model| {
+                    let model_mat = glam::Mat4::from_scale_rotation_translation(scale.0, rot.0, pos.0);
                         batches
-                            .entry((model_comp.id, model_comp.mesh_index))
+                            .entry((model.id, model.mesh_index))
                             .or_default()
-                            .push(render::InstanceRaw { model: model_mat });
-                    }
-                );
+                            .push(render::InstanceRaw::new(model_mat));
+                });
                 
                 let mut total_instances = 0;
                 let mut draw_calls = 0;
@@ -337,7 +366,7 @@ pub fn run<A: Application>(config: EngineConfig, app: A) -> anyhow::Result<()> {
         znear: 0.1,
         zfar: 100.0,
     };
-    let camera_controller = CameraController::new(0.2);
+    let camera_controller = CameraController::new(5.0);
 
     let egui_ctx = egui::Context::default();
     let egui_state = None;

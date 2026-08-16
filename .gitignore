@@ -2,6 +2,8 @@
 rustc-ice-*.txt
 **/*.rs.bk
 
+/res/
+
 /perf.data
 /perf.data.old
 **/target/criterion/

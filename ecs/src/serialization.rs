@@ -1,4 +1,4 @@
-use super::{Position, Rotation, Scale, ModelComponent, World};
+use super::{Position, Rotation, Scale, LightComponent, ModelComponent, World};
 use asset::AssetId;
 use flecs_ecs::prelude::*;
 use glam::{Quat, Vec3};
@@ -15,6 +15,11 @@ pub struct WorldSnapshot {
     pub scales: Vec<[f32; 3]>,
     pub model_ids: Vec<AssetId>, 
     pub mesh_indices: Vec<usize>,
+
+    pub light_entities: Vec<u64>,
+    pub light_positions: Vec<[f32; 3]>,
+    pub light_rotations: Vec<[f32; 4]>,
+    pub lights: Vec<LightComponent>,
 }
 
 pub fn save_world(world: &World, path: &str) -> anyhow::Result<()> {
@@ -34,6 +39,18 @@ pub fn save_world(world: &World, path: &str) -> anyhow::Result<()> {
         mesh_indices.push(model.mesh_index);
     });
 
+    let mut light_entities = Vec::new();
+    let mut light_positions = Vec::new();
+    let mut light_rotations = Vec::new();
+    let mut lights = Vec::new();
+
+    world.inner.each_entity::<(&Position, &Rotation, &LightComponent)>(|entity, (pos, rot, light)| {
+        light_entities.push(*entity.id());
+        light_positions.push(pos.0.to_array());
+        light_rotations.push(rot.0.to_array());
+        lights.push(light.clone());
+    });
+
     let snapshot = WorldSnapshot {
         entities,
         positions,
@@ -41,6 +58,10 @@ pub fn save_world(world: &World, path: &str) -> anyhow::Result<()> {
         scales,
         model_ids,
         mesh_indices,
+        light_entities,
+        light_positions,
+        light_rotations,
+        lights,
     };
 
     let bytes = rkyv::to_bytes::<Error>(&snapshot)
@@ -87,6 +108,16 @@ impl MappedWorld {
                 .set(Rotation(Quat::from_array(r)))
                 .set(Scale(Vec3::from_array(s)))
                 .set(ModelComponent { id: m_id, mesh_index: m_idx })
+                .add(super::Static);
+        }
+
+        let light_count = snapshot.light_entities.len();
+        for i in 0..light_count {
+            world.inner
+                .entity()
+                .set(Position(Vec3::from_array(snapshot.light_positions[i])))
+                .set(Rotation(Quat::from_array(snapshot.light_rotations[i])))
+                .set(snapshot.lights[i].clone())
                 .add(super::Static);
         }
     }
