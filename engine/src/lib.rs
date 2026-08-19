@@ -99,8 +99,9 @@ impl<A: Application> EngineRunner<A> {
                 ).await
             }).await;
 
-            if res.is_err() {
-                log::error!("Failed to load model async: {}", file_name_owned);
+            match res {
+                Ok(_) => log::info!("Model {} loaded successfully!", file_name_owned),
+                Err(e) => log::error!("Failed to load model '{}'. Exact error: {:#?}", file_name_owned, e),
             }
         });
     }
