@@ -113,12 +113,30 @@ where
 
     let mut meshes = Vec::new();
     for m in &baked_model.meshes {
+        let mut min = glam::Vec3::splat(f32::MAX);
+        let mut max = glam::Vec3::splat(f32::MIN);
+        
+        for v in &m.vertices {
+            let pos = glam::Vec3::from(v.position);
+            min = min.min(pos);
+            max = max.max(pos);
+        }
+        
+        let center = (min + max) * 0.5;
+        let mut max_radius_sq: f32 = 0.0;
+        
+        for v in &m.vertices {
+            let pos = glam::Vec3::from(v.position);
+            max_radius_sq = max_radius_sq.max(pos.distance_squared(center));
+        }
+        let radius = max_radius_sq.sqrt();
+
         let vertices: Vec<model::ModelVertex> = m.vertices.iter().map(|v| {
             model::ModelVertex {
                 position: v.position,
                 tex_coords: v.tex_coords,
                 normal: v.normal,
-                tangent: v.tangent, // Передаем честные тангенсы из кукера
+                tangent: v.tangent,
             }
         }).collect();
 
@@ -140,6 +158,8 @@ where
             index_buffer,
             num_elements: m.indices.len() as u32,
             material: m.material_id,
+            bounding_center: center.into(),
+            bounding_radius: radius,
         });
     }
 

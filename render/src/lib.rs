@@ -4,7 +4,7 @@ pub mod texture;
 pub mod mipmap;
 pub mod light;
 
-use crate::light::{LightUniform, LightsBuffer, MAX_LIGHTS};
+use crate::light::{LightUniform};
 
 use glam::{Mat4, Vec4};
 use std::sync::Arc;
@@ -13,7 +13,24 @@ use std::sync::Arc;
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CameraUniform {
     pub view_proj: Mat4,
+    pub view_matrix: Mat4,
+    pub inv_proj_matrix: Mat4,
     pub view_position: Vec4,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ClusterData {
+    pub grid_dim: [u32; 3],
+    pub z_near: f32,
+    
+    pub tile_size: [f32; 2],
+    pub screen_size: [f32; 2],
+    
+    pub z_far: f32,
+    pub total_lights: u32,
+    pub dir_light_count: u32,
+    pub padding: u32,
 }
 
 #[repr(C)]
@@ -55,6 +72,51 @@ impl InstanceRaw {
     }
 }
 
+const GRID_X: u32 = 16;
+const GRID_Y: u32 = 9;
+const GRID_Z: u32 = 24;
+const TOTAL_CLUSTERS: u32 = GRID_X * GRID_Y * GRID_Z;
+const MAX_LIGHTS_PER_CLUSTER: u32 = 256;
+
+pub struct Frustum {
+    planes: [glam::Vec4; 6],
+}
+
+impl Frustum {
+    pub fn from_view_proj(vp: glam::Mat4) -> Self {
+        let r1 = vp.row(0);
+        let r2 = vp.row(1);
+        let r3 = vp.row(2);
+        let r4 = vp.row(3);
+
+        let mut planes = [
+            r4 + r1, // Left
+            r4 - r1, // Right
+            r4 + r2, // Bottom
+            r4 - r2, // Top
+            r3,      // Near
+            r4 - r3, // Far
+        ];
+
+        for p in &mut planes {
+            let len = p.truncate().length();
+            *p /= len;
+        }
+
+        Self { planes }
+    }
+
+    #[inline]
+    pub fn intersects_sphere(&self, center: glam::Vec3, radius: f32) -> bool {
+        for p in &self.planes {
+            if p.truncate().dot(center) + p.w < -radius {
+                return false;
+            }
+        }
+        true
+    }
+}
+
 pub struct Renderer {
     pub egui_renderer: egui_wgpu::Renderer,
     pub depth_texture: texture::Texture,
@@ -63,12 +125,23 @@ pub struct Renderer {
     instance_buffer: wgpu::Buffer,
     instance_buffer_capacity: usize,
     camera_bind_group: wgpu::BindGroup,
+    compute_bind_group: wgpu::BindGroup,
+    compute_pipeline: wgpu::ComputePipeline,
     camera_buffer: wgpu::Buffer,
+    sorted_lights: Vec<LightUniform>,
     lights_buffer: wgpu::Buffer,
+    cluster_data_buffer: wgpu::Buffer,
+    #[allow(dead_code)]
+    cluster_grid_buffer: wgpu::Buffer,
+    #[allow(dead_code)]
+    light_indices_buffer: wgpu::Buffer,
+    depth_pipeline: wgpu::RenderPipeline,
     render_pipeline: wgpu::RenderPipeline,
     
     is_surface_configured: bool,
     pub config: wgpu::SurfaceConfiguration,
+    instances_cache: Vec<InstanceRaw>,
+    draw_calls_cache: Vec<(Arc<model::Model>, usize, std::ops::Range<u32>)>,
     pub material_bind_group_layout: Arc<wgpu::BindGroupLayout>,
     
     pub queue: Arc<wgpu::Queue>,
@@ -85,10 +158,7 @@ impl Renderer {
         window: impl Into<wgpu::SurfaceTarget<'static>>,
     ) -> anyhow::Result<Self> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            #[cfg(not(target_arch = "wasm32"))]
             backends: wgpu::Backends::PRIMARY,
-            #[cfg(target_arch = "wasm32")]
-            backends: wgpu::Backends::GL,
             flags: Default::default(),
             memory_budget_thresholds: Default::default(),
             backend_options: Default::default(),
@@ -112,11 +182,7 @@ impl Renderer {
                 label: None,
                 required_features: wgpu::Features::INDIRECT_FIRST_INSTANCE,
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
-                required_limits: if cfg!(target_arch = "wasm32") {
-                    wgpu::Limits::downlevel_webgl2_defaults()
-                } else {
-                    wgpu::Limits::default()
-                },
+                required_limits: wgpu::Limits::default(),
                 memory_hints: Default::default(),
                 trace: wgpu::Trace::Off,
             })
@@ -139,7 +205,7 @@ impl Renderer {
             format: surface_format,
             width: 800,
             height: 600,
-            present_mode: surface_caps.present_modes[0],
+            present_mode: wgpu::PresentMode::Immediate,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
@@ -206,58 +272,168 @@ impl Renderer {
         
         let lights_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Lights Buffer"),
-            size: std::mem::size_of::<LightsBuffer>() as wgpu::BufferAddress,
+            size: (std::mem::size_of::<light::LightUniform>() * light::MAX_LIGHTS) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let cluster_data_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Cluster Data Buffer"),
+            size: std::mem::size_of::<ClusterData>() as wgpu::BufferAddress,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
-        let camera_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("camera_bind_group_layout"),
-                entries: &[
-                    // Camera binding
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
+        let cluster_grid_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Cluster Grid Buffer"),
+            size: (TOTAL_CLUSTERS * 8) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let light_indices_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Light Indices Buffer"),
+            size: (TOTAL_CLUSTERS * MAX_LIGHTS_PER_CLUSTER * 4) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let compute_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Compute Bind Group Layout"),
+            entries: &[
+                // 0: Camera Uniform
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                    count: None,
+                },
+                // 1: Cluster Data Uniform
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                    count: None,
+                },
+                // 2: Lights Buffer Uniform
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer { 
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false, 
+                        min_binding_size: None 
                     },
-                    // Lights binding
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    }
-                ],
-            });
+                    count: None,
+                },
+                // 3: Cluster Grid (Storage, Read-Write)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None },
+                    count: None,
+                },
+                // 4: Light Indices (Storage, Read-Write)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None },
+                    count: None,
+                },
+            ],
+        });
+
+        let compute_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Compute Bind Group"),
+            layout: &compute_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: camera_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: cluster_data_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: lights_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: cluster_grid_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: light_indices_buffer.as_entire_binding() },
+            ],
+        });
+
+        let cull_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("cull_cs.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(include_str!(concat!(env!("OUT_DIR"), "/cull_cs.wgsl")).into()),
+        });
+
+        let compute_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Compute Pipeline Layout"),
+            bind_group_layouts: &[Some(&compute_bind_group_layout)],
+            immediate_size: 0,
+        });
+
+        let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Compute Culling Pipeline"),
+            layout: Some(&compute_pipeline_layout),
+            module: &cull_module,
+            entry_point: Some("cull_lights"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+
+        let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("camera_bind_group_layout"),
+            entries: &[
+                // 0: Camera Uniform (Vertex + Fragment)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                    count: None,
+                },
+                // 1: Lights Buffer Uniform (Fragment)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer { 
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false, 
+                        min_binding_size: None 
+                    },
+                    count: None,
+                },
+                // 2: Cluster Data Uniform (Fragment)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                    count: None,
+                },
+                // 3: Cluster Grid (Storage, Read-Only!) (Fragment)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None },
+                    count: None,
+                },
+                // 4: Light Indices (Storage, Read-Only!) (Fragment)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None },
+                    count: None,
+                },
+            ],
+        });
 
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("camera_bind_group"),
             layout: &camera_bind_group_layout,
             entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: camera_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: lights_buffer.as_entire_binding(),
-                },
+                wgpu::BindGroupEntry { binding: 0, resource: camera_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: lights_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: cluster_data_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: cluster_grid_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: light_indices_buffer.as_entire_binding() },
             ],
         });
         
         let vs_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("main_vs.wgsl"),
-            // Читаем WGSL как строку
             source: wgpu::ShaderSource::Wgsl(include_str!(concat!(env!("OUT_DIR"), "/main_vs.wgsl")).into()),
         });
 
@@ -279,6 +455,45 @@ impl Renderer {
                 ],
                 immediate_size: 0,
             });
+
+        let depth_fs_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("depth_fs.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(include_str!(concat!(env!("OUT_DIR"), "/depth_fs.wgsl")).into()),
+        });
+
+        let depth_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Depth Prepass Pipeline"),
+            layout: Some(&render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &vs_module,
+                entry_point: Some("vs_main"),
+                buffers: &[Some(model::ModelVertex::desc()), Some(InstanceRaw::desc())],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &depth_fs_module,
+                entry_point: Some("depth_fs_main"),
+                targets: &[],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: texture::Texture::DEPTH_FORMAT,
+                depth_write_enabled: Some(true), 
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
 
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Render Pipeline"),
@@ -306,15 +521,15 @@ impl Renderer {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None, //Some(wgpu::Face::Back),
+                cull_mode: Some(wgpu::Face::Back),
                 polygon_mode: wgpu::PolygonMode::Fill,
                 unclipped_depth: false,
                 conservative: false,
             },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: texture::Texture::DEPTH_FORMAT,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::Less),
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
@@ -333,11 +548,20 @@ impl Renderer {
             instance_buffer,
             instance_buffer_capacity: initial_capacity,
             camera_bind_group,
+            compute_bind_group,
+            compute_pipeline,
+            sorted_lights: Vec::with_capacity(crate::light::MAX_LIGHTS),
             lights_buffer,
+            cluster_data_buffer,
+            cluster_grid_buffer,
+            light_indices_buffer,
             camera_buffer,
+            depth_pipeline,
             render_pipeline,
             is_surface_configured: false,
             config,
+            instances_cache: Vec::with_capacity(10000),
+            draw_calls_cache: Vec::with_capacity(1000),
             material_bind_group_layout,
             queue,
             device,
@@ -357,47 +581,51 @@ impl Renderer {
         }
     }
 
-    pub fn upload_view_projection(&mut self, view_proj: Mat4) {
+    pub fn upload_camera(&mut self, camera_uniform: CameraUniform) {
         self.queue.write_buffer(
             &self.camera_buffer,
             0,
-            bytemuck::cast_slice(&[view_proj]),
+            bytemuck::cast_slice(&[camera_uniform]),
         );
     }
 
-    pub fn upload_instances(&mut self, instances: &[InstanceRaw]) {
+    pub fn upload_instances(&mut self, instances: &[InstanceRaw]) -> bool {
+        let mut reallocated = false;
+        
         if instances.len() > self.instance_buffer_capacity {
             let new_capacity = instances.len() + instances.len() / 2;
             self.instance_buffer = Self::create_instance_buffer(&self.device, new_capacity);
             self.instance_buffer_capacity = new_capacity;
+            reallocated = true;
         }
+        
         self.queue.write_buffer(
             &self.instance_buffer,
             0,
             bytemuck::cast_slice(instances),
         );
+        
+        reallocated
     }
 
     pub fn upload_lights(&mut self, lights: &[LightUniform]) {
-        let mut buffer_data = LightsBuffer {
-            count: lights.len().min(MAX_LIGHTS) as u32,
-            _padding: [0; 3],
-            lights: [bytemuck::Zeroable::zeroed(); MAX_LIGHTS],
-        };
+        self.sorted_lights.clear();
+        self.sorted_lights.extend_from_slice(lights);
+        
+        self.sorted_lights.sort_unstable_by_key(|l| l.light_type);
 
-        for (i, light) in lights.iter().take(MAX_LIGHTS).enumerate() {
-            buffer_data.lights[i] = *light;
-        }
-
+        let count = self.sorted_lights.len().min(light::MAX_LIGHTS);
+        
         self.queue.write_buffer(
             &self.lights_buffer,
             0,
-            bytemuck::cast_slice(&[buffer_data]),
+            bytemuck::cast_slice(&self.sorted_lights[..count]),
         );
     }
 
     pub fn render_batches(
         &mut self,
+        camera: &CameraUniform,
         batches: &[(Arc<model::Model>, usize, Vec<InstanceRaw>)],
         egui_primitives: &[egui::ClippedPrimitive],
         egui_screen_descriptor: &egui_wgpu::ScreenDescriptor,
@@ -406,19 +634,50 @@ impl Renderer {
             return Ok(());
         }
 
-        let mut all_instances = Vec::new();
-        let mut draw_calls = Vec::new();
-        let mut current_offset = 0;
+        self.instances_cache.clear();
+        self.draw_calls_cache.clear();
+
+        let frustum = Frustum::from_view_proj(camera.view_proj);
 
         for (model, mesh_idx, instances) in batches {
             let count = instances.len() as u32;
-            all_instances.extend_from_slice(instances);
+            if count == 0 { continue; }
+            
+            let mesh = &model.meshes[*mesh_idx];
+            let local_center = glam::Vec3::from(mesh.bounding_center);
+            let local_radius = mesh.bounding_radius;
+            
+            let start_offset = self.instances_cache.len() as u32;
+            let mut visible_count = 0;
+            
+            for inst in instances {
+                let scale = glam::Vec3::new(
+                    inst.model.x_axis.truncate().length(),
+                    inst.model.y_axis.truncate().length(),
+                    inst.model.z_axis.truncate().length()
+                ).max_element();
 
-            draw_calls.push((model.clone(), *mesh_idx, current_offset..(current_offset + count)));
-            current_offset += count;
+                let world_center = inst.model.transform_point3(local_center);
+                let world_radius = local_radius * scale;
+
+                if frustum.intersects_sphere(world_center, world_radius) {
+                    self.instances_cache.push(*inst);
+                    visible_count += 1;
+                }
+            }
+
+            if visible_count > 0 {
+                self.draw_calls_cache.push((
+                    model.clone(), 
+                    *mesh_idx, 
+                    start_offset..(start_offset + visible_count)
+                ));
+            }
         }
 
-        self.upload_instances(&all_instances);
+        let instances = std::mem::take(&mut self.instances_cache);
+        self.upload_instances(&instances);
+        self.instances_cache = instances;
 
         let output = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(surface_texture) => surface_texture,
@@ -438,6 +697,26 @@ impl Renderer {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
+        let max_l = light::MAX_LIGHTS;
+        let total_lights = self.sorted_lights.len().min(max_l) as u32;
+        let dir_light_count = self.sorted_lights
+            .iter()
+            .take(max_l)
+            .filter(|l| l.light_type == 0)
+            .count() as u32;
+
+        let cluster_data = ClusterData {
+            grid_dim: [GRID_X, GRID_Y, GRID_Z],
+            z_near: 0.1,
+            z_far: 1000.0,
+            tile_size: [self.config.width as f32 / GRID_X as f32, self.config.height as f32 / GRID_Y as f32],
+            screen_size: [self.config.width as f32, self.config.height as f32],
+            total_lights,
+            dir_light_count,
+            padding: 0,
+        };
+        self.queue.write_buffer(&self.cluster_data_buffer, 0, bytemuck::cast_slice(&[cluster_data]));
+
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -452,62 +731,73 @@ impl Renderer {
             egui_screen_descriptor,
         );
 
+        // compute pass (culling lights)
         {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Render Pass"),
+            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+            compute_pass.set_pipeline(&self.compute_pipeline);
+            compute_pass.set_bind_group(0, &self.compute_bind_group, &[]);
+            compute_pass.dispatch_workgroups((GRID_X + 7) / 8, (GRID_Y + 7) / 8, GRID_Z);
+        }
+
+        // z-prepass
+        {
+            let mut depth_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Depth Prepass"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_texture.view,
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
+
+            depth_pass.set_pipeline(&self.depth_pipeline);
+            depth_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            depth_pass.set_bind_group(1, &self.camera_bind_group, &[]);
+
+            for (model, mesh_idx, range) in &self.draw_calls_cache {
+                let mesh = &model.meshes[*mesh_idx];
+                let material = &model.materials[mesh.material];
+                depth_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                depth_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                depth_pass.set_bind_group(0, &material.bind_group, &[]);
+                depth_pass.draw_indexed(0..mesh.num_elements, 0, range.clone());
+            }
+        }
+
+        // color pass
+        {
+            let mut color_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Color Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.2,
-                            b: 0.3,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.1, g: 0.2, b: 0.3, a: 1.0 }), store: wgpu::StoreOp::Store },
                     depth_slice: None,
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &self.depth_texture.view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Store,
-                    }),
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store }),
                     stencil_ops: None,
                 }),
-                occlusion_query_set: None,
-                timestamp_writes: None,
-                multiview_mask: None,
+                ..Default::default()
             });
 
-            // binding pipeline
-            render_pass.set_pipeline(&self.render_pipeline);
-            
-            // binding instance buffer
-            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            
-            // binding camera buffer
-            render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
+            color_pass.set_pipeline(&self.render_pipeline);
+            color_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            color_pass.set_bind_group(1, &self.camera_bind_group, &[]);
 
-            // drawing mesh from model
-            for (model, mesh_idx, range) in draw_calls {
-                if mesh_idx >= model.meshes.len() { continue; }
-
-                let mesh = &model.meshes[mesh_idx];
+            for (model, mesh_idx, range) in &self.draw_calls_cache {
+                let mesh = &model.meshes[*mesh_idx];
                 let material = &model.materials[mesh.material];
-                
-                render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                
-                // bingind texture/material
-                render_pass.set_bind_group(0, &material.bind_group, &[]);
-                
-                render_pass.draw_indexed(0..mesh.num_elements, 0, range.clone());
+                color_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                color_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                color_pass.set_bind_group(0, &material.bind_group, &[]);
+                color_pass.draw_indexed(0..mesh.num_elements, 0, range.clone());
             }
         }
-
+        
         {
             let egui_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Egui Pass"),

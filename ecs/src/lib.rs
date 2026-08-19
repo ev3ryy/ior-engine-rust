@@ -101,9 +101,7 @@ pub fn spawn_scene(
         let local_scale = Vec3::from_array(node.scale);
 
         let local_matrix = glam::Mat4::from_scale_rotation_translation(local_scale, local_rot, local_pos);
-        
         let global_matrix = parent_global_matrix * local_matrix;
-
         let (global_scale, global_rot, global_pos) = global_matrix.to_scale_rotation_translation();
 
         let entity = world.inner.entity()
@@ -112,11 +110,28 @@ pub fn spawn_scene(
             .set(Scale(global_scale))
             .add(Static);
 
-        if !node.meshes.is_empty() {
-            entity.set(ModelComponent {
-                id: asset_id,
-                mesh_index: node.meshes[0],
-            });
+        if let Some(parent) = parent_entity {
+            entity.child_of(parent);
+        }
+
+        for (i, &mesh_idx) in node.meshes.iter().enumerate() {
+            if i == 0 {
+                entity.set(ModelComponent {
+                    id: asset_id,
+                    mesh_index: mesh_idx,
+                });
+            } else {
+                world.inner.entity()
+                    .child_of(entity)
+                    .set(Position(global_pos))
+                    .set(Rotation(global_rot))
+                    .set(Scale(global_scale))
+                    .set(ModelComponent {
+                        id: asset_id,
+                        mesh_index: mesh_idx,
+                    })
+                    .add(Static);
+            }
         }
 
         if let Some(light_idx) = node.light {
@@ -131,14 +146,10 @@ pub fn spawn_scene(
                 light_type,
                 color: b_light.color,
                 intensity: b_light.intensity, 
-                range: b_light.range,
+                range: b_light.range * global_scale.x,
                 inner_angle: b_light.inner_angle,
                 outer_angle: b_light.outer_angle,
             });
-        }
-
-        if let Some(parent) = parent_entity {
-            entity.child_of(parent);
         }
 
         for &child_idx in &node.children {

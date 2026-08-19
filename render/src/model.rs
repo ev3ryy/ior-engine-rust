@@ -73,6 +73,9 @@ pub struct Mesh {
     pub index_buffer: wgpu::Buffer,
     pub num_elements: u32,
     pub material: usize,
+
+    pub bounding_center: [f32; 3],
+    pub bounding_radius: f32,
 }
 
 pub struct Model {

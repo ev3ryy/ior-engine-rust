@@ -39,7 +39,10 @@ impl<'a> mikktspace::Geometry for MeshBuffer<'a> {
 
     fn set_tangent_encoded(&mut self, tangent: [f32; 4], face: usize, vert: usize) {
         let idx = self.indices[face * 3 + vert] as usize;
-        self.tangents[idx] = tangent;
+        self.tangents[idx][0] += tangent[0];
+        self.tangents[idx][1] += tangent[1];
+        self.tangents[idx][2] += tangent[2];
+        self.tangents[idx][3] = tangent[3];
     }
 }
 
@@ -201,6 +204,13 @@ fn main() -> Result<()> {
 
             if reader.read_tangents().is_none() {
                 mikktspace::generate_tangents(&mut mesh_buffer);
+
+                for t in &mut mesh_buffer.tangents {
+                    let len = (t[0] * t[0] + t[1] * t[1] + t[2] * t[2]).sqrt();
+                    if len > 0.0001 {
+                        t[0] /= len; t[1] /= len; t[2] /= len;
+                    }
+                }
             } else if let Some(tangents_iter) = reader.read_tangents() {
                 for (i, t) in tangents_iter.enumerate() {
                     mesh_buffer.tangents[i] = t;
@@ -259,7 +269,7 @@ fn main() -> Result<()> {
                 let baked_light = shared::BakedLight {
                     light_type,
                     color: light.color(),
-                    intensity: light.intensity() / 100.0, 
+                    intensity: (light.intensity() / 100.0).clamp(0.0, 10.0),
                     range: light.range().unwrap_or(100.0),
                     inner_angle: inner,
                     outer_angle: outer,

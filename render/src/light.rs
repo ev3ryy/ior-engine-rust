@@ -11,17 +11,8 @@ pub struct LightUniform {
     pub range: f32,          // radius
 
     pub inner_cone_cos: f32, // for spot (inner cos)
-    pub outer_cone_cos: f32, // Для Spot (outer cos)
+    pub outer_cone_cos: f32, // for Spot (outer cos)
     pub padding: [f32; 2],   // 64 byte
 }
 
-// limit for uniform buffer
-pub const MAX_LIGHTS: usize = 16; 
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct LightsBuffer {
-    pub count: u32,
-    pub _padding: [u32; 3], // 16 byte
-    pub lights: [LightUniform; MAX_LIGHTS],
-}
+pub const MAX_LIGHTS: usize = 10000;

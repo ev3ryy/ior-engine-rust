@@ -125,15 +125,11 @@ impl Application for Editor {
             WindowEvent::MouseWheel { delta, .. } => {
                 match delta {
                     MouseScrollDelta::PixelDelta(pos) => {
-                        // Плавный скролл тачпадом -> Вращение камеры
-                        // Примечание: Умножаем на 0.5 для сглаживания. Знак минус может 
-                        // понадобиться поменять, в зависимости от настроек Natural Scrolling в ОС.
                         let dx = pos.x as f32 * 0.5;
                         let dy = -pos.y as f32 * 0.5;
                         camera_controller.apply_movement(CameraMovement::Rotate { dx, dy });
                     }
                     MouseScrollDelta::LineDelta(_x, y) => {
-                        // Дискретный скролл колесиком мыши -> Зум
                         camera_controller.apply_movement(CameraMovement::Zoom(*y * 20.0));
                     }
                 }

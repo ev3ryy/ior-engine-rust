@@ -209,10 +209,11 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
 
                 // 2. engine: update camera matrices
                 self.camera_controller.update_camera(&mut self.camera, dt);
-                let view_proj = self.camera.view_projection_matrix();
- 
+
+                let camera_uniform = self.camera.build_uniform(); 
+
                 if let Some(renderer) = &mut self.renderer {
-                    renderer.upload_view_projection(view_proj);
+                    renderer.upload_camera(camera_uniform);
                 }
 
                 let mut egui_primitives = Vec::new();
@@ -289,7 +290,7 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                         color: light.color,
                         intensity: light.intensity,
                         direction: forward.into(),
-                        range: light.range,
+                        range: 3.0,
                         inner_cone_cos: light.inner_angle.cos(),
                         outer_cone_cos: light.outer_angle.cos(),
                         padding: [0.0; 2],
@@ -300,7 +301,7 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                     renderer.upload_lights(&light_uniforms); 
                 }
 
-                let mut batches: std::collections::HashMap<(asset::AssetId, usize), Vec<render::InstanceRaw>> = std::collections::HashMap::new();
+                let mut batches: std::collections::BTreeMap<(asset::AssetId, usize), Vec<render::InstanceRaw>> = std::collections::BTreeMap::new();
 
                 self.world.each_model(|pos, rot, scale, model| {
                     let model_mat = glam::Mat4::from_scale_rotation_translation(scale.0, rot.0, pos.0);
@@ -309,7 +310,7 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                             .or_default()
                             .push(render::InstanceRaw::new(model_mat));
                 });
-                
+            
                 let mut total_instances = 0;
                 let mut draw_calls = 0;
                 let mut render_data = Vec::new();
@@ -325,7 +326,7 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                 self.metrics.instance_count = total_instances as u32;
                 self.metrics.draw_calls = draw_calls;
                 if let Some(renderer) = &mut self.renderer {
-                    if let Err(e) = renderer.render_batches(&render_data, &egui_primitives, &screen_desc) {
+                    if let Err(e) = renderer.render_batches(&camera_uniform,&render_data, &egui_primitives, &screen_desc) {
                         log::error!("Render error: {e}");
                         event_loop.exit();
                     }

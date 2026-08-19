@@ -21,8 +21,10 @@ fn main() {
     let shaders = vec![
         ("shaders/main.slang", "vs_main", "vertex", "main_vs.wgsl"),
         ("shaders/main.slang", "fs_main", "fragment", "main_fs.wgsl"),
+        ("shaders/main.slang", "depth_fs_main", "fragment", "depth_fs.wgsl"),
         ("shaders/blit.slang", "vs_main", "vertex", "blit_vs.wgsl"),
         ("shaders/blit.slang", "fs_main", "fragment", "blit_fs.wgsl"),
+        ("shaders/cull.slang", "cull_lights", "compute", "cull_cs.wgsl"),
     ];
 
     for (src, entry, stage, dst) in shaders {
