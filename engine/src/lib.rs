@@ -31,7 +31,7 @@ struct EngineRunner<A: Application> {
     egui_state: Option<egui_winit::State>,
     egui_ctx: egui::Context,
     
-    loaded_models: std::collections::HashSet<String>,
+    tracked_models: std::collections::HashMap<asset::AssetId, String>,
     asset_events: tokio::sync::broadcast::Receiver<AssetEvent>,
     asset_server: Arc<AssetServer>,
 
@@ -59,10 +59,13 @@ pub struct EngineMetrics {
 
 impl<A: Application> EngineRunner<A> {
     fn load_model_async(&mut self, file_name: &str) {
-        if self.loaded_models.contains(file_name) {
+        let asset_id = asset::AssetId::from_path(file_name);
+
+        if self.tracked_models.contains_key(&asset_id) {
             return;
         }
-        self.loaded_models.insert(file_name.to_string());
+
+        self.tracked_models.insert(asset_id, file_name.to_string());
         
         let Some(renderer) = &self.renderer else { return };
         
@@ -113,11 +116,21 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
         event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
 
         if self.window.is_none() {
-            let mut window_attributes = Window::default_attributes();
-            window_attributes.title = self.config.window_title.clone();
+            let window_attributes = Window::default_attributes()
+            .with_title(self.config.window_title.clone())
+            .with_inner_size(winit::dpi::LogicalSize::new(
+                self.config.window_width,
+                self.config.window_height,
+            ));
 
             let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
-            let renderer = pollster::block_on(Renderer::new(window.clone())).unwrap();
+            let size = window.inner_size();
+
+            let renderer = pollster::block_on(Renderer::new(window.clone(), size.width, size.height)).unwrap();
+
+            if size.width > 0 && size.height > 0 {
+                self.camera.aspect = size.width as f32 / size.height as f32
+            }
 
             let viewport_id = egui::ViewportId::ROOT;
             self.egui_state = Some(egui_winit::State::new(
@@ -188,19 +201,36 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
 
                 let mut reloads = Vec::new();
                 while let Ok(event) = self.asset_events.try_recv() {
-                    if let AssetEvent::Unloaded { id, .. } = event {
-                        for name in &self.loaded_models {
-                            let glb_name = name.replace(".bin", ".glb");
-                            if asset::AssetId::from_path(&glb_name) == id || asset::AssetId::from_path(name) == id {
-                                reloads.push(name.clone());
+                    match event {
+                        AssetEvent::Unloaded { id, .. } => {
+                            if let Some(name) = self.tracked_models.remove(&id) {
+                                reloads.push(name);
+                            } else {
+                                let mut found_id = None;
+                                for (&tracked_id, name) in &self.tracked_models {
+                                    let glb_id = asset::AssetId::from_path(&name.replace(".bin", ".glb"));
+                                    if glb_id == id {
+                                        found_id = Some(tracked_id);
+                                        reloads.push(name.clone());
+                                        break;
+                                    }
+                                }
+                                if let Some(id_to_remove) = found_id {
+                                    self.tracked_models.remove(&id_to_remove);
+                                }
                             }
                         }
+                        AssetEvent::Failed { id, error, .. } => {
+                            if let Some(name) = self.tracked_models.remove(&id) {
+                                log::warn!("Removed failed model '{}' from tracking cache: {}", name, error);
+                            }
+                        }
+                        _ => {}
                     }
                 }
 
                 for name in reloads {
                     log::warn!("Hot-reloading model: {}", name);
-                    self.loaded_models.remove(&name);
                     self.asset_server.unload::<render::model::Model>(asset::AssetId::from_path(&name));
                     self.load_model_async(&name);
                 }
@@ -277,21 +307,21 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                 let mut light_uniforms = Vec::new();
 
                 self.world.each_light(|pos, rot, light| {
-                    let forward = rot.0 * glam::Vec3::Z;
-                    
+                    let direction = (rot.0 * -glam::Vec3::Z).normalize();
+
                     let light_type = match light.light_type {
                         ecs::LightType::Directional => 0,
                         ecs::LightType::Point => 1,
                         ecs::LightType::Spot => 2,
                     };
-                    
+
                     light_uniforms.push(LightUniform {
                         position: pos.0.into(),
                         light_type,
                         color: light.color,
                         intensity: light.intensity,
-                        direction: forward.into(),
-                        range: 3.0,
+                        direction: direction.into(),
+                        range: light.range.max(0.1),
                         inner_cone_cos: light.inner_angle.cos(),
                         outer_cone_cos: light.outer_angle.cos(),
                         padding: [0.0; 2],
@@ -304,12 +334,11 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
 
                 let mut batches: std::collections::BTreeMap<(asset::AssetId, usize), Vec<render::InstanceRaw>> = std::collections::BTreeMap::new();
 
-                self.world.each_model(|pos, rot, scale, model| {
-                    let model_mat = glam::Mat4::from_scale_rotation_translation(scale.0, rot.0, pos.0);
-                        batches
-                            .entry((model.id, model.mesh_index))
-                            .or_default()
-                            .push(render::InstanceRaw::new(model_mat));
+                self.world.each_model(|global_transform, model| {
+                    batches
+                        .entry((model.id, model.mesh_index))
+                        .or_default()
+                        .push(render::InstanceRaw::new(global_transform.0));
                 });
             
                 let mut total_instances = 0;
@@ -373,16 +402,16 @@ pub fn run<A: Application>(config: EngineConfig, app: A) -> anyhow::Result<()> {
     let egui_ctx = egui::Context::default();
     let egui_state = None;
 
-    let loaded_models = std::collections::HashSet::new();
+    let tracked_models = std::collections::HashMap::new();
 
     let mut runner = EngineRunner {
         app,
         config,
         
         egui_state,
-        egui_ctx,
+        egui_ctx,   
         
-        loaded_models,
+        tracked_models,
         asset_events,
         asset_server,
         

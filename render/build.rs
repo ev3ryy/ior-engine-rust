@@ -25,6 +25,7 @@ fn main() {
         ("shaders/blit.slang", "vs_main", "vertex", "blit_vs.wgsl"),
         ("shaders/blit.slang", "fs_main", "fragment", "blit_fs.wgsl"),
         ("shaders/cull.slang", "cull_lights", "compute", "cull_cs.wgsl"),
+        ("shaders/shadow.slang", "vs_main", "vertex", "shadow_vs.wgsl"),
     ];
 
     for (src, entry, stage, dst) in shaders {

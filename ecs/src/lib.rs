@@ -5,7 +5,7 @@ pub use components::*;
 
 use flecs_ecs::prelude::*;
 
-use glam::{Quat, Vec3};
+use glam::{Quat, Vec3, Mat4};
 use asset::AssetId;
 use shared::BakedModel;
 
@@ -26,12 +26,26 @@ impl World {
         }
     }
 
+    pub fn update_transforms(&self) {
+        self.inner.each_entity::<(&Position, &Rotation, &Scale)>(|entity, (pos, rot, scale)| {
+            let local_matrix = Mat4::from_scale_rotation_translation(scale.0, rot.0, pos.0);
+            
+            if let Some(parent) = entity.parent() {
+                let mut parent_global = Mat4::IDENTITY;
+                parent.try_get::<&GlobalTransform>(|g| parent_global = g.0);
+                entity.set(GlobalTransform(parent_global * local_matrix));
+            } else {
+                entity.set(GlobalTransform(local_matrix));
+            }
+        });
+    }
+
     pub fn each_model<F>(&self, mut f: F)
     where
-        F: FnMut(&Position, &Rotation, &Scale, &ModelComponent),
+        F: FnMut(&GlobalTransform, &ModelComponent),
     {
-        self.inner.each::<(&Position, &Rotation, &Scale, &ModelComponent)>(
-            |(pos, rot, scale, model)| f(pos, rot, scale, model)
+        self.inner.each::<(&GlobalTransform, &ModelComponent)>(
+            |(global, model)| f(global, model)
         );
     }
 
@@ -92,7 +106,7 @@ pub fn spawn_scene(
         baked_model: &BakedModel,
         node_idx: usize,
         parent_entity: Option<flecs_ecs::core::EntityView<'a>>,
-        parent_global_matrix: glam::Mat4, 
+        parent_global_matrix: glam::Mat4,
     ) -> flecs_ecs::core::EntityView<'a> {
         let node = &baked_model.nodes[node_idx];
 
@@ -108,6 +122,7 @@ pub fn spawn_scene(
             .set(Position(global_pos))
             .set(Rotation(global_rot))
             .set(Scale(global_scale))
+            .set(GlobalTransform(global_matrix))
             .add(Static);
 
         if let Some(parent) = parent_entity {
@@ -126,6 +141,7 @@ pub fn spawn_scene(
                     .set(Position(global_pos))
                     .set(Rotation(global_rot))
                     .set(Scale(global_scale))
+                    .set(GlobalTransform(global_matrix))
                     .set(ModelComponent {
                         id: asset_id,
                         mesh_index: mesh_idx,
@@ -145,7 +161,7 @@ pub fn spawn_scene(
             entity.set(LightComponent {
                 light_type,
                 color: b_light.color,
-                intensity: b_light.intensity, 
+                intensity: b_light.intensity,
                 range: b_light.range * global_scale.x,
                 inner_angle: b_light.inner_angle,
                 outer_angle: b_light.outer_angle,
@@ -160,7 +176,7 @@ pub fn spawn_scene(
     }
 
     let root_matrix = glam::Mat4::from_translation(root_position);
-    
+
     for &root_idx in &baked_model.roots {
         spawn_node(world, asset_id, baked_model, root_idx, None, root_matrix);
     }
@@ -172,6 +188,7 @@ pub fn create_world() -> World {
     world.component::<Position>();
     world.component::<Rotation>();
     world.component::<Scale>();
+    world.component::<GlobalTransform>();
     world.component::<LightComponent>();
     world.component::<ModelComponent>();
     world.component::<Static>();

@@ -1,6 +1,9 @@
 use anyhow::*;
 use image::GenericImageView;
+use std::sync::OnceLock;
 use crate::mipmap::MipmapGenerator;
+
+static MIPMAP_GENERATOR: OnceLock<MipmapGenerator> = OnceLock::new();
 
 pub struct Texture {
     #[allow(unused)]
@@ -123,8 +126,10 @@ impl Texture {
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Mipmap Blit Encoder"),
             });
-            let mut generator = MipmapGenerator::new(device);
+
+            let generator = MIPMAP_GENERATOR.get_or_init(|| MipmapGenerator::new(device));
             generator.generate_mipmaps(device, &mut encoder, &texture, format, mip_level_count);
+
             queue.submit(std::iter::once(encoder.finish()));
         }
 

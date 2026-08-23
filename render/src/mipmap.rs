@@ -1,12 +1,8 @@
-use std::collections::HashMap;
-
 pub struct MipmapGenerator {
     bind_group_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
-    vs_module: wgpu::ShaderModule,
-    fs_module: wgpu::ShaderModule,
-    pipeline_layout: wgpu::PipelineLayout,
-    pipelines: HashMap<wgpu::TextureFormat, wgpu::RenderPipeline>,
+    pipeline_srgb: wgpu::RenderPipeline,
+    pipeline_linear: wgpu::RenderPipeline,
 }
 
 impl MipmapGenerator {
@@ -59,29 +55,18 @@ impl MipmapGenerator {
             ..Default::default()
         });
 
-        Self {
-            bind_group_layout,
-            sampler,
-            vs_module,
-            fs_module,
-            pipeline_layout,
-            pipelines: HashMap::new(),
-        }
-    }
-
-    fn ensure_pipeline(&mut self, device: &wgpu::Device, format: wgpu::TextureFormat) {
-        if !self.pipelines.contains_key(&format) {
-            let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(&format!("Mipmap Pipeline ({format:?})")),
-                layout: Some(&self.pipeline_layout),
+        let create_pipeline = |format: wgpu::TextureFormat, label: &str| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
-                    module: &self.vs_module,
+                    module: &vs_module,
                     entry_point: Some("vs_main"),
                     buffers: &[],
                     compilation_options: Default::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
-                    module: &self.fs_module,
+                    module: &fs_module,
                     entry_point: Some("fs_main"),
                     targets: &[Some(wgpu::ColorTargetState {
                         format,
@@ -98,14 +83,22 @@ impl MipmapGenerator {
                 multisample: wgpu::MultisampleState::default(),
                 multiview_mask: None,
                 cache: None,
-            });
+            })
+        };
 
-            self.pipelines.insert(format, pipeline);
+        let pipeline_srgb = create_pipeline(wgpu::TextureFormat::Rgba8UnormSrgb, "Mipmap Pipeline (sRGB)");
+        let pipeline_linear = create_pipeline(wgpu::TextureFormat::Rgba8Unorm, "Mipmap Pipeline (Linear)");
+
+        Self {
+            bind_group_layout,
+            sampler,
+            pipeline_srgb,
+            pipeline_linear,
         }
     }
 
     pub fn generate_mipmaps(
-        &mut self,
+        &self,
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
         texture: &wgpu::Texture,
@@ -116,8 +109,11 @@ impl MipmapGenerator {
             return;
         }
 
-        self.ensure_pipeline(device, format);
-        let pipeline = &self.pipelines[&format];
+        let pipeline = match format {
+            wgpu::TextureFormat::Rgba8UnormSrgb => &self.pipeline_srgb,
+            wgpu::TextureFormat::Rgba8Unorm => &self.pipeline_linear,
+            _ => panic!("Unsupported format for mipmap generation: {:?}", format),
+        };
 
         let views: Vec<wgpu::TextureView> = (0..mip_count)
             .map(|mip| {

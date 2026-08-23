@@ -1,6 +1,11 @@
 import common;
 import pbr;
 
+public struct ShadowUniform {
+    public column_major float4x4 light_space_matrices[4];
+    public float4 cascade_splits;
+}
+
 [[vk::binding(0, 1)]] ConstantBuffer<CameraUniform> camera;
 [[vk::binding(1, 1)]] StructuredBuffer<Light> lights;
 [[vk::binding(0, 0)]] ConstantBuffer<MaterialUniform> material;
@@ -13,6 +18,10 @@ import pbr;
 [[vk::binding(2, 1)]] ConstantBuffer<ClusterData> cluster_data;
 [[vk::binding(3, 1)]] StructuredBuffer<ClusterLightGroup> cluster_grid;
 [[vk::binding(4, 1)]] StructuredBuffer<uint> light_indices;
+
+[[vk::binding(5, 1)]] ConstantBuffer<ShadowUniform> shadow_data;
+[[vk::binding(0, 2)]] DepthTexture2DArray shadow_map;
+[[vk::binding(1, 2)]] SamplerComparisonState shadow_sampler;
 
 struct VertexOutput {
     float4 clip_position : SV_Position;
@@ -76,6 +85,96 @@ float3 calc_pbr_lighting(float3 L, float3 V, float3 N, float NdotV, float3 radia
     float3 f_diffuse = (kD * c_diff) / PI;
 
     return (f_diffuse + f_specular) * radiance * NdotL;
+}
+
+float sample_cascade_shadow(
+    float3 world_pos,
+    float3 N,
+    float3 L,
+    uint cascade_idx
+) {
+    float3 biased_pos = world_pos + N * 0.005;
+
+    float4 light_space_pos =
+        mul(
+            shadow_data.light_space_matrices[cascade_idx],
+            float4(biased_pos, 1.0)
+        );
+
+    if (light_space_pos.w <= 0.0) return 1.0;
+
+    float3 proj_coords = light_space_pos.xyz / light_space_pos.w;
+    proj_coords.x = proj_coords.x * 0.5 + 0.5;
+    proj_coords.y = proj_coords.y * -0.5 + 0.5;
+
+    if (proj_coords.z < 0.0 || proj_coords.z > 1.0) return 1.0;
+
+    uint width; uint height; uint elements; uint levels;
+    shadow_map.GetDimensions(0, width, height, elements, levels);
+    float2 texel_size = 1.0 / float2(width, height);
+
+    float compare_depth = proj_coords.z;
+    float shadow = 0.0;
+
+    for (int x = -1; x <= 1; ++x) {
+        for (int y = -1; y <= 1; ++y) {
+            float2 offset = float2(x, y) * texel_size;
+            shadow += shadow_map.SampleCmp(
+                shadow_sampler,
+                float3(proj_coords.xy + offset, cascade_idx),
+                compare_depth
+            );
+        }
+    }
+
+    return shadow / 9.0;
+}
+
+float calc_csm_shadow(
+    float3 world_pos,
+    float view_z,
+    float3 N,
+    float3 L
+) {
+    uint cascade_idx = 3;
+
+    for (uint i = 0; i < 4; ++i) {
+        if (view_z <= shadow_data.cascade_splits[i]) {
+            cascade_idx = i;
+            break;
+        }
+    }
+
+    float shadow = sample_cascade_shadow(
+        world_pos,
+        N,
+        L,
+        cascade_idx
+    );
+
+    if (cascade_idx < 3) {
+        float cascade_far = shadow_data.cascade_splits[cascade_idx];
+        float cascade_near = (cascade_idx > 0) ? shadow_data.cascade_splits[cascade_idx - 1] : 0.0;
+        
+        float cascade_range = cascade_far - cascade_near;
+        float blend_width = cascade_range * 0.15;
+        float blend_start = cascade_far - blend_width;
+
+        if (view_z > blend_start) {
+            float blend_t = smoothstep(blend_start, cascade_far, view_z);
+            
+            float next_shadow = sample_cascade_shadow(
+                world_pos,
+                N,
+                L,
+                cascade_idx + 1
+            );
+
+            shadow = lerp(shadow, next_shadow, blend_t);
+        }
+    }
+
+    return shadow;
 }
 
 [shader("fragment")]
@@ -148,9 +247,14 @@ float4 fs_main(
     // directional light
     for (uint d = 0; d < cluster_data.dir_light_count; d++) {
         Light light = lights[d];
-        
         float3 L = normalize(-light.direction);
-        float3 dir_radiance = light.color * light.intensity; 
+        
+        float shadow = 1.0;
+        if (d == 0) {
+            shadow = calc_csm_shadow(world_position, view_z, N, L);
+        }
+
+        float3 dir_radiance = light.color * light.intensity * shadow; 
         Lo += calc_pbr_lighting(L, V, N, NdotV, dir_radiance, roughness, F0, c_diff);
     }
 
@@ -183,7 +287,7 @@ float4 fs_main(
         Lo += calc_pbr_lighting(L, V, N, NdotV, point_radiance, roughness, F0, c_diff);
     }
 
-    float3 ambient = float3(0.02) * albedo * ao;
+    float3 ambient = float3(0.15) * albedo * ao;
     float3 final_color = ambient + Lo;
 
     float a = 2.51; float b = 0.03; float c = 2.43; float d = 0.59; float e = 0.14;

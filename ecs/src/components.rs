@@ -1,5 +1,5 @@
 use flecs_ecs::prelude::*;
-use glam::{Quat, Vec3};
+use glam::{Quat, Vec3, Mat4};
 use asset::AssetId;
 use rkyv::{Archive, Deserialize, Serialize};
 
@@ -16,6 +16,15 @@ pub struct Scale(pub Vec3);
 impl Default for Scale {
     fn default() -> Self {
         Self(Vec3::ONE)
+    }
+}
+
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct GlobalTransform(pub Mat4);
+
+impl Default for GlobalTransform {
+    fn default() -> Self {
+        Self(Mat4::IDENTITY)
     }
 }
 

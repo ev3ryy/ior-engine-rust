@@ -18,6 +18,13 @@ impl AssetId {
             .and_then(|registry| registry.get(self).map(|p| p.clone()))
             .unwrap_or_else(|| format!("UnknownPath({})", self.0))
     }
+
+    pub fn has_known_path(&self) -> bool {
+        PATH_REGISTRY
+            .get()
+            .map(|registry| registry.contains_key(self))
+            .unwrap_or(false)
+    }
 }
 
 // determine
@@ -44,9 +51,9 @@ impl AssetId {
         path.hash(&mut hasher);
         let id = AssetId(hasher.finish());
 
-        #[cfg(debug_assertions)]
-        {
-            let registry = PATH_REGISTRY.get_or_init(DashMap::new);
+        let registry = PATH_REGISTRY.get_or_init(DashMap::new);
+        
+        if !registry.contains_key(&id) {
             registry.insert(id, path.to_string());
         }
 
