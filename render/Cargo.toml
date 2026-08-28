@@ -25,6 +25,7 @@ glam = {version = "0.33.2", features = ["bytemuck"]}
 tobj = { version = "4.0.4", default-features = false, features = ["async"] }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 tokio = { version = "1", features = ["sync", "fs"], optional = true }
+serde = {version = "1.0", features=["derive"]}
 
 [build-dependencies]
 anyhow = "1.0"

@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
+use render::postprocess::PostProcessSettings; 
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EditorConfig {
     pub window_title: String,
@@ -27,6 +29,9 @@ pub struct EditorConfig {
 
     // Save / load
     pub world_save_path: String,
+
+    #[serde(default)]
+    pub postprocess: PostProcessSettings,
 }
 
 impl Default for EditorConfig {
@@ -46,6 +51,11 @@ impl Default for EditorConfig {
             initial_grid_rows: 10,
             initial_grid_spacing: 3.0,
             world_save_path: "world.bin".to_string(),
+            postprocess: PostProcessSettings {
+                grain_enabled: false,
+                grain_intensity: 0.015,
+                ..Default::default()
+            },
         }
     }
 }

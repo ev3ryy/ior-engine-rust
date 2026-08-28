@@ -22,6 +22,7 @@ pub struct EngineConfig {
     pub window_title: String,
     pub window_width: u32,
     pub window_height: u32,
+    pub msaa_samples: u32,
 }
 
 struct EngineRunner<A: Application> {
@@ -31,7 +32,7 @@ struct EngineRunner<A: Application> {
     egui_state: Option<egui_winit::State>,
     egui_ctx: egui::Context,
     
-    tracked_models: std::collections::HashMap<asset::AssetId, String>,
+    pub tracked_models: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<asset::AssetId, String>>>,
     asset_events: tokio::sync::broadcast::Receiver<AssetEvent>,
     asset_server: Arc<AssetServer>,
 
@@ -39,6 +40,8 @@ struct EngineRunner<A: Application> {
     camera: Camera,
     camera_controller: CameraController,
     
+    light_uniforms_cache: Vec<LightUniform>,
+
     metrics: EngineMetrics,
     last_frame_time: std::time::Instant,
     frames_this_second: u32,
@@ -61,11 +64,13 @@ impl<A: Application> EngineRunner<A> {
     fn load_model_async(&mut self, file_name: &str) {
         let asset_id = asset::AssetId::from_path(file_name);
 
-        if self.tracked_models.contains_key(&asset_id) {
-            return;
+        {
+            let mut tracked = self.tracked_models.lock().unwrap();
+            if tracked.contains_key(&asset_id) {
+                return;
+            }
+            tracked.insert(asset_id, file_name.to_string());
         }
-
-        self.tracked_models.insert(asset_id, file_name.to_string());
         
         let Some(renderer) = &self.renderer else { return };
         
@@ -74,6 +79,7 @@ impl<A: Application> EngineRunner<A> {
         let layout = renderer.material_bind_group_layout.clone();
         let server = self.asset_server.clone();
         let file_name_owned = file_name.to_string();
+        let tracked_models = self.tracked_models.clone();
 
         self.rt.spawn(async move {
             let server_for_closure = server.clone();
@@ -103,8 +109,14 @@ impl<A: Application> EngineRunner<A> {
             }).await;
 
             match res {
-                Ok(_) => log::info!("Model {} loaded successfully!", file_name_owned),
-                Err(e) => log::error!("Failed to load model '{}'. Exact error: {:#?}", file_name_owned, e),
+                Ok(_) => {
+                    log::info!("Model {} loaded successfully!", file_name_owned);
+                }
+                Err(e) => {
+                    log::error!("Failed to load model '{}'. Exact error: {:#?}", file_name_owned, e);
+                    let mut tracked = tracked_models.lock().unwrap();
+                    tracked.remove(&asset_id);
+                }
             }
         });
     }
@@ -126,7 +138,7 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
             let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
             let size = window.inner_size();
 
-            let renderer = pollster::block_on(Renderer::new(window.clone(), size.width, size.height)).unwrap();
+            let renderer = pollster::block_on(Renderer::new(window.clone(), size.width, size.height, self.config.msaa_samples)).unwrap();
 
             if size.width > 0 && size.height > 0 {
                 self.camera.aspect = size.width as f32 / size.height as f32
@@ -199,29 +211,18 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                     window.request_redraw();
                 }
 
-                let mut reloads = Vec::new();
+                let mut reloads: Vec<String> = Vec::new();
                 while let Ok(event) = self.asset_events.try_recv() {
                     match event {
                         AssetEvent::Unloaded { id, .. } => {
-                            if let Some(name) = self.tracked_models.remove(&id) {
+                            let mut tracked = self.tracked_models.lock().unwrap();
+                            if let Some(name) = tracked.remove(&id) {
                                 reloads.push(name);
-                            } else {
-                                let mut found_id = None;
-                                for (&tracked_id, name) in &self.tracked_models {
-                                    let glb_id = asset::AssetId::from_path(&name.replace(".bin", ".glb"));
-                                    if glb_id == id {
-                                        found_id = Some(tracked_id);
-                                        reloads.push(name.clone());
-                                        break;
-                                    }
-                                }
-                                if let Some(id_to_remove) = found_id {
-                                    self.tracked_models.remove(&id_to_remove);
-                                }
                             }
                         }
                         AssetEvent::Failed { id, error, .. } => {
-                            if let Some(name) = self.tracked_models.remove(&id) {
+                            let mut tracked = self.tracked_models.lock().unwrap();
+                            if let Some(name) = tracked.remove(&id) {
                                 log::warn!("Removed failed model '{}' from tracking cache: {}", name, error);
                             }
                         }
@@ -237,6 +238,8 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
 
                 // 1. app updates logic
                 self.app.on_update(&mut self.world, &mut self.camera, &mut self.camera_controller);
+
+                self.world.update_transforms();
 
                 // 2. engine: update camera matrices
                 self.camera_controller.update_camera(&mut self.camera, dt);
@@ -255,16 +258,23 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
 
                 let mut load_requests = Vec::new();
 
-                let ui_result = if let (Some(window), Some(egui_state)) = (&self.window, &mut self.egui_state) {
+                let ui_result = if let (Some(window), Some(egui_state), Some(renderer)) = (&self.window, &mut self.egui_state, &mut self.renderer) {
                     let raw_input = egui_state.take_egui_input(window.as_ref());
                     self.egui_ctx.begin_pass(raw_input);
 
-                    self.app.on_ui(&self.egui_ctx, &mut self.world, &mut self.camera, &self.metrics, &mut load_requests);
+                    self.app.on_ui(
+                        &self.egui_ctx,
+                        &mut self.world,
+                        &mut self.camera,
+                        &mut renderer.postprocess_settings,
+                        &self.metrics,
+                        &mut load_requests,
+                    );
 
                     let full_output = self.egui_ctx.end_pass();
-                    
+
                     egui_state.handle_platform_output(window.as_ref(), full_output.platform_output);
-                    
+
                     Some((full_output.textures_delta, full_output.shapes, full_output.pixels_per_point))
                 } else {
                     None
@@ -304,10 +314,15 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                 }
 
                 // 3. engine: collect data to ecs
-                let mut light_uniforms = Vec::new();
+                self.light_uniforms_cache.clear();
 
                 self.world.each_light(|pos, rot, light| {
-                    let direction = (rot.0 * -glam::Vec3::Z).normalize();
+                    let forward = rot.0 * -glam::Vec3::Z;
+                    let direction = if forward.length_squared() < 1e-6 {
+                        glam::Vec3::NEG_Y
+                    } else {
+                        forward.normalize()
+                    };
 
                     let light_type = match light.light_type {
                         ecs::LightType::Directional => 0,
@@ -315,21 +330,31 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                         ecs::LightType::Spot => 2,
                     };
 
-                    light_uniforms.push(LightUniform {
+                    let (inner_cos, outer_cos) = if light_type == 2 {
+                        let inner = light.inner_angle.min(light.outer_angle);
+                        let outer = light.outer_angle.max(light.inner_angle);
+                        (inner.cos(), outer.cos())
+                    } else {
+                        (0.0, 0.0)
+                    };
+
+                    self.light_uniforms_cache.push(LightUniform {
                         position: pos.0.into(),
                         light_type,
                         color: light.color,
                         intensity: light.intensity,
                         direction: direction.into(),
                         range: light.range.max(0.1),
-                        inner_cone_cos: light.inner_angle.cos(),
-                        outer_cone_cos: light.outer_angle.cos(),
-                        padding: [0.0; 2],
+                        inner_cone_cos: inner_cos,
+                        outer_cone_cos: outer_cos,
+                        
+                        shadow_index: -1,
+                        shadow_bias: 1.0,
                     });
                 });
 
                 if let Some(renderer) = &mut self.renderer {
-                    renderer.upload_lights(&light_uniforms); 
+                    renderer.upload_lights(&self.light_uniforms_cache, &camera_uniform);
                 }
 
                 let mut batches: std::collections::BTreeMap<(asset::AssetId, usize), Vec<render::InstanceRaw>> = std::collections::BTreeMap::new();
@@ -374,14 +399,14 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
 pub fn run<A: Application>(config: EngineConfig, app: A) -> anyhow::Result<()> {
     let rt = Arc::new(tokio::runtime::Runtime::new()?);
 
-    let asset_server = Arc::new(AssetServer::new(std::time::Duration::from_secs(5)));
+    let asset_root = asset::resolve_asset_root();
+    log::info!("Assets root resolved to: {:?}", asset_root);
+
+    let asset_server = Arc::new(AssetServer::new(asset_root, std::time::Duration::from_secs(5)));
     let asset_events = asset_server.subscribe();
 
-    let res_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../res");
-    if let Err(e) = asset_server.watch_directory(&res_path) {
-        log::error!("failed to load asset server: {e}");
-    } else {
-        log::info!("asset server loaded in: {:?}", res_path);
+    if let Err(e) = asset_server.watch_directory() {
+        log::error!("failed to start asset watcher: {e}");
     }
 
     let event_loop = EventLoop::new()?;
@@ -402,7 +427,7 @@ pub fn run<A: Application>(config: EngineConfig, app: A) -> anyhow::Result<()> {
     let egui_ctx = egui::Context::default();
     let egui_state = None;
 
-    let tracked_models = std::collections::HashMap::new();
+    let tracked_models = Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
 
     let mut runner = EngineRunner {
         app,
@@ -418,6 +443,8 @@ pub fn run<A: Application>(config: EngineConfig, app: A) -> anyhow::Result<()> {
         world,
         camera,
         camera_controller,
+
+        light_uniforms_cache: Vec::with_capacity(100),
         
         metrics: EngineMetrics::default(),
         last_frame_time: std::time::Instant::now(),

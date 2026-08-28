@@ -1,27 +1,21 @@
 import common;
 import pbr;
+import shadows;
 
-public struct ShadowUniform {
-    public column_major float4x4 light_space_matrices[4];
-    public float4 cascade_splits;
-}
-
-[[vk::binding(0, 1)]] ConstantBuffer<CameraUniform> camera;
-[[vk::binding(1, 1)]] StructuredBuffer<Light> lights;
+// --- materials group 0---
 [[vk::binding(0, 0)]] ConstantBuffer<MaterialUniform> material;
-
 [[vk::binding(1, 0)]] Texture2D<float4> t_albedo;
 [[vk::binding(2, 0)]] Texture2D<float4> t_normal;
 [[vk::binding(3, 0)]] Texture2D<float4> t_orm;
 [[vk::binding(4, 0)]] SamplerState s_sampler;
 
+// --- global frame and clustering resources group 0 ---
+[[vk::binding(0, 1)]] ConstantBuffer<CameraUniform> camera;
+[[vk::binding(1, 1)]] StructuredBuffer<Light> lights;
 [[vk::binding(2, 1)]] ConstantBuffer<ClusterData> cluster_data;
 [[vk::binding(3, 1)]] StructuredBuffer<ClusterLightGroup> cluster_grid;
 [[vk::binding(4, 1)]] StructuredBuffer<uint> light_indices;
-
 [[vk::binding(5, 1)]] ConstantBuffer<ShadowUniform> shadow_data;
-[[vk::binding(0, 2)]] DepthTexture2DArray shadow_map;
-[[vk::binding(1, 2)]] SamplerComparisonState shadow_sampler;
 
 struct VertexOutput {
     float4 clip_position : SV_Position;
@@ -32,6 +26,7 @@ struct VertexOutput {
     [[vk::location(4)]] float3 world_bitangent;
 };
 
+// --- Vertex Shader ---
 [shader("vertex")]
 VertexOutput vs_main(
     [[vk::location(0)]] float3 position,
@@ -43,7 +38,7 @@ VertexOutput vs_main(
     [[vk::location(6)]] float4 model_1,
     [[vk::location(7)]] float4 model_2,
     [[vk::location(8)]] float4 model_3,
-    
+
     [[vk::location(9)]]  float4 normal_m_0,
     [[vk::location(10)]] float4 normal_m_1,
     [[vk::location(11)]] float4 normal_m_2,
@@ -57,136 +52,35 @@ VertexOutput vs_main(
 
     float4 world_pos = mul(model_matrix, float4(position, 1.0));
     out.world_position = world_pos.xyz;
-    
-    out.world_normal = normalize(mul(normal_matrix, float4(normal, 0.0)).xyz);
-    out.world_tangent = normalize(mul(model_matrix, float4(tangent.xyz, 0.0)).xyz);
-    out.world_bitangent = cross(out.world_normal, out.world_tangent) * tangent.w;
+
+    float3 world_n = mul(normal_matrix, float4(normal, 0.0)).xyz;
+    out.world_normal = length(world_n) > 1e-4 ? normalize(world_n) : float3(0.0, 1.0, 0.0);
+
+    float3 world_t = mul(model_matrix, float4(tangent.xyz, 0.0)).xyz;
+    if (length(world_t) > 1e-4) {
+        out.world_tangent = normalize(world_t);
+        out.world_bitangent = cross(out.world_normal, out.world_tangent) * (tangent.w != 0.0 ? tangent.w : 1.0);
+    } else {
+        out.world_tangent = float3(0.0);
+        out.world_bitangent = float3(0.0);
+    }
 
     out.clip_position = mul(camera.view_proj, world_pos);
     return out;
 }
 
-float3 calc_pbr_lighting(float3 L, float3 V, float3 N, float NdotV, float3 radiance, float roughness, float3 F0, float3 c_diff) {
-    float3 H = normalize(V + L);
-
-    float actual_NdotL = dot(N, L);
-    if (actual_NdotL <= 0.0) return float3(0.0);
-
-    float NdotL = actual_NdotL;
-    float NdotH = max(dot(N, H), 0.0);
-    float HdotV = max(dot(H, V), 0.0);
-
-    float D = distribution_ggx(NdotH, roughness);
-    float3 F = fresnel_schlick(HdotV, F0);
-    float Vis = visibility_schlick_ggx(NdotL, NdotV, roughness);
-
-    float3 f_specular = D * F * Vis;
-    float3 kD = float3(1.0) - F; 
-    float3 f_diffuse = (kD * c_diff) / PI;
-
-    return (f_diffuse + f_specular) * radiance * NdotL;
-}
-
-float sample_cascade_shadow(
-    float3 world_pos,
-    float3 N,
-    float3 L,
-    uint cascade_idx
-) {
-    float3 biased_pos = world_pos + N * 0.005;
-
-    float4 light_space_pos =
-        mul(
-            shadow_data.light_space_matrices[cascade_idx],
-            float4(biased_pos, 1.0)
-        );
-
-    if (light_space_pos.w <= 0.0) return 1.0;
-
-    float3 proj_coords = light_space_pos.xyz / light_space_pos.w;
-    proj_coords.x = proj_coords.x * 0.5 + 0.5;
-    proj_coords.y = proj_coords.y * -0.5 + 0.5;
-
-    if (proj_coords.z < 0.0 || proj_coords.z > 1.0) return 1.0;
-
-    uint width; uint height; uint elements; uint levels;
-    shadow_map.GetDimensions(0, width, height, elements, levels);
-    float2 texel_size = 1.0 / float2(width, height);
-
-    float compare_depth = proj_coords.z;
-    float shadow = 0.0;
-
-    for (int x = -1; x <= 1; ++x) {
-        for (int y = -1; y <= 1; ++y) {
-            float2 offset = float2(x, y) * texel_size;
-            shadow += shadow_map.SampleCmp(
-                shadow_sampler,
-                float3(proj_coords.xy + offset, cascade_idx),
-                compare_depth
-            );
-        }
-    }
-
-    return shadow / 9.0;
-}
-
-float calc_csm_shadow(
-    float3 world_pos,
-    float view_z,
-    float3 N,
-    float3 L
-) {
-    uint cascade_idx = 3;
-
-    for (uint i = 0; i < 4; ++i) {
-        if (view_z <= shadow_data.cascade_splits[i]) {
-            cascade_idx = i;
-            break;
-        }
-    }
-
-    float shadow = sample_cascade_shadow(
-        world_pos,
-        N,
-        L,
-        cascade_idx
-    );
-
-    if (cascade_idx < 3) {
-        float cascade_far = shadow_data.cascade_splits[cascade_idx];
-        float cascade_near = (cascade_idx > 0) ? shadow_data.cascade_splits[cascade_idx - 1] : 0.0;
-        
-        float cascade_range = cascade_far - cascade_near;
-        float blend_width = cascade_range * 0.15;
-        float blend_start = cascade_far - blend_width;
-
-        if (view_z > blend_start) {
-            float blend_t = smoothstep(blend_start, cascade_far, view_z);
-            
-            float next_shadow = sample_cascade_shadow(
-                world_pos,
-                N,
-                L,
-                cascade_idx + 1
-            );
-
-            shadow = lerp(shadow, next_shadow, blend_t);
-        }
-    }
-
-    return shadow;
-}
-
+// --- Depth Prepass Fragment Shader ---
 [shader("fragment")]
-void depth_fs_main(
-    [[vk::location(0)]] float2 tex_coords
-) {
+void depth_fs_main([[vk::location(0)]] float2 tex_coords) {
     float4 albedo_tex = t_albedo.Sample(s_sampler, tex_coords);
-    if (albedo_tex.a * material.base_color_factor.a < 0.5) {
+    float cutoff = material.alpha_cutoff > 0.001 ? material.alpha_cutoff : 0.5;
+
+    if (albedo_tex.a * material.base_color_factor.a < cutoff) {
         discard;
     }
 }
 
+// --- Main Forward+ Fragment Shader ---
 [shader("fragment")]
 float4 fs_main(
     [[vk::location(0)]] float2 tex_coords,
@@ -194,75 +88,77 @@ float4 fs_main(
     [[vk::location(2)]] float3 world_normal,
     [[vk::location(3)]] float3 world_tangent,
     [[vk::location(4)]] float3 world_bitangent,
-    float4 frag_coord : SV_Position,
+    float4 frag_coord : SV_Position
 ) : SV_Target {
-    
+    // 1. Alpha testing
     float4 albedo_tex = t_albedo.Sample(s_sampler, tex_coords);
-
-    if (albedo_tex.a * material.base_color_factor.a < 0.5) {
+    float alpha = albedo_tex.a * material.base_color_factor.a;
+    if (alpha < material.alpha_cutoff || alpha < 0.5) {
         discard;
     }
 
-    float3 albedo = albedo_tex.rgb * material.base_color_factor.rgb;
-    
+    // 2. Material properties
+    float3 albedo = albedo_tex.rgb;
     float4 orm = t_orm.Sample(s_sampler, tex_coords);
     float ao = orm.r;
-    float roughness = clamp(orm.g * material.roughness_factor, 0.05, 1.0);
+    float roughness = clamp(orm.g * material.roughness_factor, 0.25, 1.0);
     float metallic = clamp(orm.b * material.metallic_factor, 0.0, 1.0);
-    
-    float3 raw_normal = t_normal.Sample(s_sampler, tex_coords).xyz * 2.0 - 1.0;
-    float3 map_normal = normalize(raw_normal);
 
-    float3 N = normalize(
-        map_normal.x * world_tangent + 
-        map_normal.y * world_bitangent + 
-        map_normal.z * world_normal
-    );
+    // 3. TBN
+    float3 N = normalize(world_normal);
+    if (length(world_tangent) > 0.5) {
+        float3 raw_normal = t_normal.Sample(s_sampler, tex_coords).xyz * 2.0 - 1.0;
+        float3 map_normal = normalize(raw_normal);
+        N = normalize(
+            map_normal.x * world_tangent +
+            map_normal.y * world_bitangent +
+            map_normal.z * world_normal
+        );
+    }
 
     float3 V = normalize(camera.view_position.xyz - world_position);
-    
     float3 F0 = lerp(float3(0.04), albedo, metallic);
     float3 c_diff = albedo * (1.0 - metallic);
+    float NdotV = max(dot(N, V), 0.0001);
 
+    // 4. Cluster indexing
     uint tile_x = uint(frag_coord.x / cluster_data.tile_size.x);
     uint tile_y = uint(frag_coord.y / cluster_data.tile_size.y);
 
     float3 view_pos_vec = mul(camera.view_matrix, float4(world_position, 1.0)).xyz;
     float view_z = -view_pos_vec.z;
-    view_z = clamp(view_z, cluster_data.z_near + 0.0001, cluster_data.z_far); 
+    view_z = clamp(view_z, cluster_data.z_near + 0.0001, cluster_data.z_far);
 
     float z_ratio = max(0.0, log(view_z / cluster_data.z_near));
     float z_scale = float(cluster_data.grid_dim.z) / log(cluster_data.z_far / cluster_data.z_near);
     uint slice_z = clamp(uint(z_ratio * z_scale), 0, cluster_data.grid_dim.z - 1);
 
-    uint cluster_index = tile_x + 
-                        (tile_y * cluster_data.grid_dim.x) + 
+    uint cluster_index = tile_x +
+                        (tile_y * cluster_data.grid_dim.x) +
                         (slice_z * cluster_data.grid_dim.x * cluster_data.grid_dim.y);
 
     ClusterLightGroup cluster = cluster_grid[cluster_index];
-
     float3 Lo = float3(0.0);
-    float NdotV = max(dot(N, V), 0.0001);
 
-    // directional light
+    // 5. Directional light (CSM)
     for (uint d = 0; d < cluster_data.dir_light_count; d++) {
         Light light = lights[d];
         float3 L = normalize(-light.direction);
-        
+
         float shadow = 1.0;
         if (d == 0) {
-            shadow = calc_csm_shadow(world_position, view_z, N, L);
+            shadow = calc_csm_shadow(world_position, view_z, N, L, shadow_data);
         }
 
-        float3 dir_radiance = light.color * light.intensity * shadow; 
+        float3 dir_radiance = light.color * light.intensity * shadow;
         Lo += calc_pbr_lighting(L, V, N, NdotV, dir_radiance, roughness, F0, c_diff);
     }
 
-    // cluster lightning
+    // 6. Clustered lights (Point and Spot)
     for (uint i = 0; i < cluster.count; i++) {
         uint light_idx = light_indices[cluster.offset + i];
         Light light = lights[light_idx];
-        
+
         float3 light_vec = light.position - world_position;
         float distance = length(light_vec);
         float3 L = normalize(light_vec);
@@ -275,23 +171,46 @@ float4 fs_main(
 
         if (attenuation < 0.001) continue;
 
-        if (light.light_type == 2) {
+        // Point Light Shadows
+        if (light.light_type == LIGHT_TYPE_POINT) {
+            if (light.shadow_index >= 0) {
+                float point_shadow = sample_point_shadow(
+                    world_position,
+                    N,
+                    light.position,
+                    uint(light.shadow_index),
+                    light.range
+                );
+                attenuation *= point_shadow;
+            }
+        }
+        // Spot Light shadows
+        else if (light.light_type == LIGHT_TYPE_SPOT) {
             float theta = dot(L, normalize(-light.direction));
             float epsilon = max(light.inner_cone_cos - light.outer_cone_cos, 0.001);
             float spot_intensity = clamp((theta - light.outer_cone_cos) / epsilon, 0.0, 1.0);
             attenuation *= spot_intensity * spot_intensity;
+
+            if (light.shadow_index >= 0) {
+                float spot_shadow = sample_spot_shadow(
+                    world_position,
+                    N,
+                    L,
+                    uint(light.shadow_index),
+                    distance,
+                    light.outer_cone_cos
+                );
+                attenuation *= spot_shadow;
+            }
         }
 
-        float3 point_radiance = light.color * light.intensity * attenuation;
-        
-        Lo += calc_pbr_lighting(L, V, N, NdotV, point_radiance, roughness, F0, c_diff);
+        float3 radiance = light.color * light.intensity * attenuation;
+        Lo += calc_pbr_lighting(L, V, N, NdotV, radiance, roughness, F0, c_diff);
     }
 
-    float3 ambient = float3(0.15) * albedo * ao;
+    // 7. Ambient
+    float3 ambient = float3(0.03) * albedo * ao;
     float3 final_color = ambient + Lo;
 
-    float a = 2.51; float b = 0.03; float c = 2.43; float d = 0.59; float e = 0.14;
-    final_color = clamp((final_color * (a * final_color + b)) / (final_color * (c * final_color + d) + e), 0.0, 1.0);
-    
-    return float4(final_color, albedo_tex.a);
+    return float4(final_color, 1.0);
 }

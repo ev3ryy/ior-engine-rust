@@ -21,8 +21,8 @@ bool test_sphere_aabb(float3 sphere_center, float radius, float3 aabb_min, float
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void cull_lights(uint3 global_id : SV_DispatchThreadID) {
-    if (global_id.x >= cluster_data.grid_dim.x || 
-        global_id.y >= cluster_data.grid_dim.y || 
+    if (global_id.x >= cluster_data.grid_dim.x ||
+        global_id.y >= cluster_data.grid_dim.y ||
         global_id.z >= cluster_data.grid_dim.z) return;
 
     float2 min_px = float2(global_id.xy) * cluster_data.tile_size;
@@ -46,7 +46,7 @@ void cull_lights(uint3 global_id : SV_DispatchThreadID) {
     float z_near = cluster_data.z_near;
     float z_far = cluster_data.z_far;
     float num_slices = float(cluster_data.grid_dim.z);
-    
+
     float tile_near_z = -z_near * pow(z_far / z_near, float(global_id.z) / num_slices);
     float tile_far_z  = -z_near * pow(z_far / z_near, float(global_id.z + 1) / num_slices);
 
@@ -67,7 +67,6 @@ void cull_lights(uint3 global_id : SV_DispatchThreadID) {
 
     for (uint i = cluster_data.dir_light_count; i < cluster_data.total_lights && light_count < MAX_LIGHTS_PER_CLUSTER; i++) {
         Light light = lights[i];
-        
         float3 view_pos = mul(camera.view_matrix, float4(light.position, 1.0)).xyz;
 
         if (view_pos.z + light.range < tile_far_z || view_pos.z - light.range > tile_near_z) {
@@ -79,16 +78,16 @@ void cull_lights(uint3 global_id : SV_DispatchThreadID) {
         }
     }
 
-    uint cluster_idx = global_id.x + 
-                       (global_id.y * cluster_data.grid_dim.x) + 
+    uint cluster_idx = global_id.x +
+                       (global_id.y * cluster_data.grid_dim.x) +
                        (global_id.z * cluster_data.grid_dim.x * cluster_data.grid_dim.y);
-                       
+
     uint offset = cluster_idx * MAX_LIGHTS_PER_CLUSTER;
-    
+
     cluster_grid[cluster_idx].offset = offset;
     cluster_grid[cluster_idx].count = light_count;
-    
-    for(uint j = 0; j < light_count; j++) {
+
+    for (uint j = 0; j < light_count; j++) {
         light_indices[offset + j] = visible_lights[j];
     }
 }

@@ -58,3 +58,6 @@ pub struct Static; // entity doesn`t move
 
 #[derive(Component, Debug, Clone, Copy)]
 pub struct Dynamic; // entity updates every frame
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SceneEntity(pub u8);

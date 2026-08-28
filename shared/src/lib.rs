@@ -8,6 +8,14 @@ pub enum BakedLightType {
     Spot = 2,
 }
 
+#[derive(Archive, Deserialize, Serialize, Debug, PartialEq, Clone, Copy)]
+#[repr(u8)]
+pub enum BakedAlphaMode {
+    Opaque = 0,
+    Mask = 1,
+    Blend = 2,
+}
+
 #[derive(Archive, Deserialize, Serialize, Debug, PartialEq, Clone)]
 pub struct BakedLight {
     pub light_type: BakedLightType,
@@ -43,6 +51,8 @@ pub struct BakedMaterial {
     pub base_color_factor: [f32; 4],
     pub metallic_factor: f32,
     pub roughness_factor: f32,
+    pub alpha_cutoff: f32,
+    pub alpha_mode: BakedAlphaMode,
 }
 
 #[derive(Archive, Deserialize, Serialize, Debug, PartialEq)]

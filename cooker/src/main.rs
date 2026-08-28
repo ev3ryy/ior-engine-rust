@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use shared::{BakedMaterial, BakedMesh, BakedModel, BakedNode, BakedVertex};
+use shared::{BakedAlphaMode, BakedMaterial, BakedMesh, BakedModel, BakedNode, BakedVertex};
 use std::collections::HashMap;
 use std::env;
 use std::fs::File;
@@ -145,6 +145,13 @@ fn main() -> Result<()> {
         let metallic_factor = pbr.metallic_factor();
         let roughness_factor = pbr.roughness_factor();
 
+        let alpha_cutoff = material.alpha_cutoff().unwrap_or(0.5);
+        let alpha_mode = match material.alpha_mode() {
+            gltf::material::AlphaMode::Opaque => BakedAlphaMode::Opaque,
+            gltf::material::AlphaMode::Mask => BakedAlphaMode::Mask,
+            gltf::material::AlphaMode::Blend => BakedAlphaMode::Blend,
+        };
+
         let diffuse_texture = extract_or_save_texture(
             pbr.base_color_texture().map(|t| t.texture()),
             "albedo",
@@ -174,7 +181,29 @@ fn main() -> Result<()> {
             base_color_factor,
             metallic_factor,
             roughness_factor,
+            alpha_cutoff,
+            alpha_mode,
         });
+    }
+
+    let mut default_material_idx = None;
+    if baked_materials.is_empty() {
+        let diffuse_texture = extract_or_save_texture(None, "albedo", out_dir, &images);
+        let normal_texture = extract_or_save_texture(None, "normal", out_dir, &images);
+        let orm_texture = extract_or_save_texture(None, "orm", out_dir, &images);
+
+        baked_materials.push(BakedMaterial {
+            name: "DefaultFallbackMaterial".to_string(),
+            diffuse_texture,
+            normal_texture,
+            orm_texture,
+            base_color_factor: [1.0, 1.0, 1.0, 1.0],
+            metallic_factor: 0.0,
+            roughness_factor: 1.0,
+            alpha_cutoff: 0.5,
+            alpha_mode: BakedAlphaMode::Opaque,
+        });
+        default_material_idx = Some(0);
     }
 
     let mut baked_meshes = Vec::new();
@@ -227,7 +256,34 @@ fn main() -> Result<()> {
                 });
             }
 
-            let material_id = primitive.material().index().unwrap_or(0);
+            let material_id = match primitive.material().index() {
+                Some(idx) => idx,
+                None => {
+                    if let Some(def_idx) = default_material_idx {
+                        def_idx
+                    } else {
+                        let diffuse_texture = extract_or_save_texture(None, "albedo", out_dir, &images);
+                        let normal_texture = extract_or_save_texture(None, "normal", out_dir, &images);
+                        let orm_texture = extract_or_save_texture(None, "orm", out_dir, &images);
+
+                        let new_idx = baked_materials.len();
+                        baked_materials.push(BakedMaterial {
+                            name: "DefaultFallbackMaterial".to_string(),
+                            diffuse_texture,
+                            normal_texture,
+                            orm_texture,
+                            base_color_factor: [1.0, 1.0, 1.0, 1.0],
+                            metallic_factor: 0.0,
+                            roughness_factor: 1.0,
+                            alpha_cutoff: 0.5,
+                            alpha_mode: BakedAlphaMode::Opaque,
+                        });
+                        default_material_idx = Some(new_idx);
+                        new_idx
+                    }
+                }
+            };
+
             let baked_idx = baked_meshes.len();
             
             baked_meshes.push(BakedMesh {

@@ -10,6 +10,7 @@ fn main() -> anyhow::Result<()> {
         window_title: editor_config.window_title.clone(),
         window_width: editor_config.window_width,
         window_height: editor_config.window_height,
+        msaa_samples: 1,
     };
     
     // editor instance

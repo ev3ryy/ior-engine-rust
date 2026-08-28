@@ -4,6 +4,7 @@ use std::hash::{Hash, Hasher};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, OnceLock};
+use std::path::{Path, PathBuf};
 use dashmap::DashMap;
 use std::time::{Instant, Duration};
 use tokio::sync::{watch, broadcast};
@@ -11,20 +12,58 @@ use notify::{Watcher};
 
 static PATH_REGISTRY: OnceLock<DashMap<AssetId, String>> = OnceLock::new();
 
-impl AssetId {
-    pub fn path(&self) -> String {
-        PATH_REGISTRY
-            .get()
-            .and_then(|registry| registry.get(self).map(|p| p.clone()))
-            .unwrap_or_else(|| format!("UnknownPath({})", self.0))
+pub fn resolve_asset_root() -> PathBuf {
+    if let Ok(path_str) = std::env::var("ENGINE_ASSETS_PATH") {
+        let p = PathBuf::from(path_str);
+        if p.exists() {
+            return p;
+        }
     }
 
-    pub fn has_known_path(&self) -> bool {
-        PATH_REGISTRY
-            .get()
-            .map(|registry| registry.contains_key(self))
-            .unwrap_or(false)
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            let candidate = exe_dir.join("res");
+            if candidate.exists() {
+                return candidate;
+            }
+        }
     }
+
+    let cwd_res = PathBuf::from("res");
+    if cwd_res.exists() {
+        return cwd_res.canonicalize().unwrap_or(cwd_res);
+    }
+
+    let mut cur = std::env::current_dir().unwrap_or_default();
+    loop {
+        let candidate = cur.join("res");
+        if candidate.exists() {
+            return candidate.canonicalize().unwrap_or(candidate);
+        }
+        if !cur.pop() {
+            break;
+        }
+    }
+
+    PathBuf::from("res")
+}
+
+fn find_cooker_executable() -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("cooker"));
+            candidates.push(dir.join("cooker.exe"));
+        }
+    }
+
+    candidates.push(PathBuf::from("target/release/cooker"));
+    candidates.push(PathBuf::from("target/release/cooker.exe"));
+    candidates.push(PathBuf::from("target/debug/cooker"));
+    candidates.push(PathBuf::from("target/debug/cooker.exe"));
+
+    candidates.into_iter().find(|p| p.exists())
 }
 
 // determine
@@ -47,17 +86,31 @@ pub struct AssetId(pub u64);
 
 impl AssetId {
     pub fn from_path(path: &str) -> Self {
+        let normalized = path.replace('\\', "/");
         let mut hasher = fnv::FnvHasher::default();
-        path.hash(&mut hasher);
+        normalized.hash(&mut hasher);
         let id = AssetId(hasher.finish());
 
         let registry = PATH_REGISTRY.get_or_init(DashMap::new);
-        
         if !registry.contains_key(&id) {
-            registry.insert(id, path.to_string());
+            registry.insert(id, normalized);
         }
 
         id
+    }
+
+    pub fn path(&self) -> String {
+        PATH_REGISTRY
+            .get()
+            .and_then(|registry| registry.get(self).map(|p| p.clone()))
+            .unwrap_or_else(|| format!("UnknownPath({})", self.0))
+    }
+
+    pub fn has_known_path(&self) -> bool {
+        PATH_REGISTRY
+            .get()
+            .map(|registry| registry.contains_key(self))
+            .unwrap_or(false)
     }
 }
 
@@ -232,26 +285,35 @@ impl<T: Send + Sync + 'static> AnyStore for StoreContainer<T> {
 }
 
 pub struct AssetServer {
+    root: PathBuf,
     stores: std::sync::RwLock<HashMap<TypeId, Arc<dyn AnyStore>>>,
-    
     event_sender: broadcast::Sender<AssetEvent>,
-    
     error_ttl: Duration,
 }
 
 impl AssetServer {
-    pub fn new(error_ttl: Duration) -> Self {
+    pub fn new(root: PathBuf, error_ttl: Duration) -> Self {
         let (event_sender, _) = broadcast::channel(256);
         Self {
+            root,
             stores: std::sync::RwLock::new(HashMap::new()),
             event_sender,
             error_ttl,
         }
     }
 
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub fn resolve_path(&self, relative: impl AsRef<Path>) -> PathBuf {
+        self.root.join(relative)
+    }
+
     pub fn subscribe(&self) -> broadcast::Receiver<AssetEvent> {
         self.event_sender.subscribe()
     }
+
     pub fn get<T: Send + Sync + 'static>(&self, id: AssetId) -> Option<Arc<T>> {
         self.get_store::<T>()?.get(id)
     }
@@ -299,7 +361,6 @@ impl AssetServer {
     fn get_or_create_store<T: Send + Sync + 'static>(&self) -> Arc<AssetStore<T>> {
         let tid = TypeId::of::<T>();
         
-        // fast way
         {
             let stores = self.stores.read().unwrap();
             if let Some(store) = stores.get(&tid) {
@@ -326,58 +387,78 @@ impl AssetServer {
         new_store
     }
 
-    pub fn watch_directory(self: &std::sync::Arc<Self>, path: impl AsRef<std::path::Path>) -> anyhow::Result<()> {
+    pub fn watch_directory(self: &std::sync::Arc<Self>) -> anyhow::Result<()> {
         let server = self.clone();
         let event_sender = self.event_sender.clone();
-        
-        let path_buf = path.as_ref().to_path_buf();
-        
+        let root_path = self.root.clone();
+
         std::thread::spawn(move || {
             let (tx, rx) = std::sync::mpsc::channel();
-            let mut watcher = notify::recommended_watcher(tx).unwrap();
+            let mut watcher = match notify::recommended_watcher(tx) {
+                Ok(w) => w,
+                Err(e) => {
+                    log::error!("Failed to create file watcher: {:?}", e);
+                    return;
+                }
+            };
             
-            watcher.watch(&path_buf, notify::RecursiveMode::Recursive).unwrap();
-            log::info!("Hot-Reloading watcher started for {:?}", path_buf);
+            if let Err(e) = watcher.watch(&root_path, notify::RecursiveMode::Recursive) {
+                log::error!("Failed to watch directory {:?}: {:?}", root_path, e);
+                return;
+            }
 
-            let mut last_run = std::time::Instant::now() - std::time::Duration::from_secs(5);
+            log::info!("Hot-Reloading watcher started for {:?}", root_path);
+
+            let mut last_run = Instant::now() - Duration::from_secs(5);
 
             for res in rx {
                 match res {
                     Ok(event) => {
-                        if !event.kind.is_modify() && !event.kind.is_create() { continue; }
+                        if !event.kind.is_modify() && !event.kind.is_create() {
+                            continue;
+                        }
                         
-                        if last_run.elapsed() < std::time::Duration::from_secs(2) {
+                        if last_run.elapsed() < Duration::from_millis(500) {
                             continue;
                         }
 
-                        for path in event.paths {
-                            if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                                if file_name.ends_with(".glb") {
-                                    log::info!("File modified: {}, running Cooker...", file_name);
+                        for abs_path in event.paths {
+                            if abs_path.extension().and_then(|e| e.to_str()) == Some("glb") {
+                                let Some(cooker_bin) = find_cooker_executable() else {
+                                    log::error!("Cooker executable not found! Cannot bake {:?}", abs_path);
+                                    continue;
+                                };
+
+                                let bin_abs_path = abs_path.with_extension("bin");
+                                
+                                log::info!("GLB modified: {:?}, baking with {:?}...", abs_path, cooker_bin);
+
+                                let status = std::process::Command::new(&cooker_bin)
+                                    .arg(&abs_path)
+                                    .arg(&bin_abs_path)
+                                    .status();
                                     
-                                    let cooker_path = std::path::PathBuf::from("target/release/cooker");
-                                    
-                                    let glb_path = path.to_str().unwrap();
-                                    let bin_path = path.with_extension("bin");
-                                    
-                                    let status = std::process::Command::new(&cooker_path)
-                                        .arg(glb_path)
-                                        .arg(bin_path.to_str().unwrap())
-                                        .status();
-                                        
-                                    if status.is_ok() {
-                                        log::info!("Bake successful!");
-                                        last_run = std::time::Instant::now();
-                                        
-                                        let id = AssetId::from_path(file_name);
-                                        let stores = server.stores.read().unwrap();
-                                        for store in stores.values() {
-                                            store.remove(id); 
+                                if let Ok(status) = status {
+                                    if status.success() {
+                                        log::info!("Bake successful for {:?}", bin_abs_path);
+                                        last_run = Instant::now();
+
+                                        if let Ok(rel_path) = bin_abs_path.strip_prefix(&root_path) {
+                                            let rel_str = rel_path.to_string_lossy().replace('\\', "/");
+                                            let bin_id = AssetId::from_path(&rel_str);
+
+                                            let stores = server.stores.read().unwrap();
+                                            for store in stores.values() {
+                                                store.remove(bin_id);
+                                            }
+
+                                            let _ = event_sender.send(AssetEvent::Unloaded { 
+                                                type_id: TypeId::of::<()>(),
+                                                id: bin_id,
+                                            });
                                         }
-                                        let _ = event_sender.send(AssetEvent::Unloaded { 
-                                            type_id: std::any::TypeId::of::<()>(),
-                                            id,
-                                        });
+                                    } else {
+                                        log::error!("Cooker returned error status: {:?}", status.code());
                                     }
                                 }
                             }

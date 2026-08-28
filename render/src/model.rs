@@ -10,10 +10,11 @@ pub trait Vertex {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct MaterialUniform {
-    pub base_color_factor: [f32; 4],
-    pub metallic_factor: f32,
-    pub roughness_factor: f32,
-    pub padding: [f32; 2], // padding 16 bytes
+    pub base_color_factor: [f32; 4], // 16 bytes
+    pub metallic_factor: f32,        // 4 byte
+    pub roughness_factor: f32,       // 4 byte
+    pub alpha_cutoff: f32,           // 4 byte
+    pub _padding: f32,               // 4 byte
 }
 
 #[repr(C)]
@@ -64,6 +65,7 @@ pub struct Material {
     pub metallic_roughness_texture: Arc<texture::Texture>,
     pub uniform_buffer: wgpu::Buffer,
     pub bind_group: wgpu::BindGroup,
+    pub has_alpha_test: bool,
 }
 
 pub struct Mesh {

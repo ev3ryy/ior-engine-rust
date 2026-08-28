@@ -12,7 +12,9 @@ pub struct LightUniform {
 
     pub inner_cone_cos: f32, // for spot (inner cos)
     pub outer_cone_cos: f32, // for Spot (outer cos)
-    pub padding: [f32; 2],   // 64 byte
+    
+    pub shadow_index: i32,
+    pub shadow_bias: f32, 
 }
 
 pub const MAX_LIGHTS: usize = 10000;
