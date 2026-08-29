@@ -1,11 +1,35 @@
-use std::path::{PathBuf};
 use std::future::Future;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use shared::BakedModel;
 use wgpu::util::DeviceExt;
 
 use crate::{model, texture};
+
+pub struct DefaultTextures {
+    pub white_albedo: Arc<texture::Texture>,
+    pub flat_normal: Arc<texture::Texture>,
+    pub default_orm: Arc<texture::Texture>,
+    pub sampler: Arc<wgpu::Sampler>,
+}
+
+impl DefaultTextures {
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+        Self {
+            white_albedo: Arc::new(texture::Texture::create_solid_color(
+                device, queue, [255, 255, 255, 255], true, "Default White Albedo",
+            )),
+            flat_normal: Arc::new(texture::Texture::create_solid_color(
+                device, queue, [128, 128, 255, 255], false, "Default Flat Normal",
+            )),
+            default_orm: Arc::new(texture::Texture::create_solid_color(
+                device, queue, [255, 255, 0, 255], false, "Default ORM (Rough=1)",
+            )),
+            sampler: Arc::new(texture::Texture::create_default_sampler(device)),
+        }
+    }
+}
 
 fn resolve_path(file_name: &str) -> PathBuf {
     let cwd_res = PathBuf::from("res").join(file_name);
@@ -36,23 +60,6 @@ fn resolve_path(file_name: &str) -> PathBuf {
     PathBuf::from("res").join(file_name)
 }
 
-fn generate_fallback_png(file_name: &str) -> Option<Vec<u8>> {
-    let color: [u8; 4] = match file_name {
-        "default_normal.png" | "normal" => [128, 128, 255, 255], // normal (flat Z)
-        "default_orm.png" | "orm" => [255, 255, 0, 255],         // AO=1, Roughness=1, Metal=0
-        "default_albedo.png" | "albedo" => [255, 255, 255, 255], // white albedo
-        _ => return None,
-    };
-
-    let mut buffer = std::io::Cursor::new(Vec::new());
-    let img = image::RgbaImage::from_pixel(1, 1, image::Rgba(color));
-    if img.write_to(&mut buffer, image::ImageFormat::Png).is_ok() {
-        Some(buffer.into_inner())
-    } else {
-        None
-    }
-}
-
 pub async fn load_string(file_name: &str) -> anyhow::Result<String> {
     let path = resolve_path(file_name);
     let txt = tokio::fs::read_to_string(&path).await?;
@@ -61,13 +68,6 @@ pub async fn load_string(file_name: &str) -> anyhow::Result<String> {
 
 pub async fn load_binary(file_name: &str) -> anyhow::Result<Vec<u8>> {
     let path = resolve_path(file_name);
-
-    if !path.exists() {
-        if let Some(bytes) = generate_fallback_png(file_name) {
-            return Ok(bytes);
-        }
-    }
-
     log::info!("Loading binary file from path: {:?}", path);
 
     let data = tokio::fs::read(&path)
@@ -90,8 +90,9 @@ pub async fn load_texture(
 pub async fn load_binary_model<F, Fut>(
     file_name: &str,
     device: &wgpu::Device,
-    _queue: &wgpu::Queue,
+    queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
+    default_textures: &DefaultTextures,
     mut load_texture_callback: F,
 ) -> anyhow::Result<model::Model>
 where
@@ -104,9 +105,20 @@ where
 
     let mut materials = Vec::new();
     for m in &baked_model.materials {
-        let albedo_texture = load_texture_callback(&m.diffuse_texture, true).await?;
-        let normal_texture = load_texture_callback(&m.normal_texture, false).await?;
-        let orm_texture = load_texture_callback(&m.orm_texture, false).await?;
+        let albedo_texture = match &m.diffuse_texture {
+            Some(path) => load_texture_callback(path, true).await?,
+            None => default_textures.white_albedo.clone(),
+        };
+
+        let normal_texture = match &m.normal_texture {
+            Some(path) => load_texture_callback(path, false).await?,
+            None => default_textures.flat_normal.clone(),
+        };
+
+        let orm_texture = match &m.orm_texture {
+            Some(path) => load_texture_callback(path, false).await?,
+            None => default_textures.default_orm.clone(),
+        };
 
         let uniform = model::MaterialUniform {
             base_color_factor: m.base_color_factor,
@@ -129,12 +141,10 @@ where
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&albedo_texture.view) },
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&normal_texture.view) },
                 wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&orm_texture.view) },
-                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&albedo_texture.sampler) },
+                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&default_textures.sampler) },
             ],
             label: Some(&format!("{} Bind Group", m.name)),
         });
-
-        let has_alpha_test = m.alpha_mode == shared::BakedAlphaMode::Mask;
 
         materials.push(model::Material {
             name: m.name.clone(),
@@ -143,15 +153,11 @@ where
             metallic_roughness_texture: orm_texture,
             uniform_buffer,
             bind_group,
-            has_alpha_test,
+            has_alpha_test: m.alpha_mode == shared::BakedAlphaMode::Mask,
         });
     }
 
     if materials.is_empty() {
-        let albedo_texture = load_texture_callback("default_albedo.png", true).await?;
-        let normal_texture = load_texture_callback("default_normal.png", false).await?;
-        let orm_texture = load_texture_callback("default_orm.png", false).await?;
-
         let uniform = model::MaterialUniform {
             base_color_factor: [1.0, 1.0, 1.0, 1.0],
             metallic_factor: 0.0,
@@ -170,19 +176,19 @@ where
             layout,
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&albedo_texture.view) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&normal_texture.view) },
-                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&orm_texture.view) },
-                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&albedo_texture.sampler) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&default_textures.white_albedo.view) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&default_textures.flat_normal.view) },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&default_textures.default_orm.view) },
+                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&default_textures.sampler) },
             ],
             label: Some("Default Fallback Bind Group"),
         });
 
         materials.push(model::Material {
             name: "DefaultFallbackMaterial".to_string(),
-            albedo_texture,
-            normal_texture,
-            metallic_roughness_texture: orm_texture,
+            albedo_texture: default_textures.white_albedo.clone(),
+            normal_texture: default_textures.flat_normal.clone(),
+            metallic_roughness_texture: default_textures.default_orm.clone(),
             uniform_buffer,
             bind_group,
             has_alpha_test: false,
@@ -191,36 +197,9 @@ where
 
     let mut meshes = Vec::new();
     for m in &baked_model.meshes {
-        let mut min = glam::Vec3::splat(f32::MAX);
-        let mut max = glam::Vec3::splat(f32::MIN);
-
-        for v in &m.vertices {
-            let pos = glam::Vec3::from(v.position);
-            min = min.min(pos);
-            max = max.max(pos);
-        }
-
-        let center = (min + max) * 0.5;
-        let mut max_radius_sq: f32 = 0.0;
-
-        for v in &m.vertices {
-            let pos = glam::Vec3::from(v.position);
-            max_radius_sq = max_radius_sq.max(pos.distance_squared(center));
-        }
-        let radius = max_radius_sq.sqrt();
-
-        let vertices: Vec<model::ModelVertex> = m.vertices.iter().map(|v| {
-            model::ModelVertex {
-                position: v.position,
-                tex_coords: v.tex_coords,
-                normal: v.normal,
-                tangent: v.tangent,
-            }
-        }).collect();
-
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(&format!("{:?} Vertex Buffer", file_name)),
-            contents: bytemuck::cast_slice(&vertices),
+            contents: bytemuck::cast_slice(&m.vertices),
             usage: wgpu::BufferUsages::VERTEX,
         });
 
@@ -242,8 +221,8 @@ where
             index_buffer,
             num_elements: m.indices.len() as u32,
             material: valid_material_id,
-            bounding_center: center.into(),
-            bounding_radius: radius,
+            bounding_center: m.bounding_center,
+            bounding_radius: m.bounding_radius,
         });
     }
 

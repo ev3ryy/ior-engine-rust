@@ -1,34 +1,63 @@
-use flecs_ecs::prelude::*;
-use glam::{Quat, Vec3, Mat4};
 use asset::AssetId;
+use flecs_ecs::prelude::*;
+use glam::{Mat4, Quat, Vec3};
 use rkyv::{Archive, Deserialize, Serialize};
 
-// transform
-#[derive(Component, Debug, Clone, Copy, PartialEq)]
-pub struct Position(pub Vec3);
+// --- Transform Components ---
 
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
-pub struct Rotation(pub Quat);
+pub struct Transform {
+    pub position: Vec3,
+    pub rotation: Quat,
+    pub scale: Vec3,
+}
 
-#[derive(Component, Debug, Clone, Copy, PartialEq)]
-pub struct Scale(pub Vec3);
-
-impl Default for Scale {
+impl Default for Transform {
     fn default() -> Self {
-        Self(Vec3::ONE)
+        Self {
+            position: Vec3::ZERO,
+            rotation: Quat::IDENTITY,
+            scale: Vec3::ONE,
+        }
     }
 }
 
-#[derive(Component, Debug, Clone, Copy, PartialEq)]
+impl Transform {
+    pub fn from_translation(position: Vec3) -> Self {
+        Self {
+            position,
+            rotation: Quat::IDENTITY,
+            scale: Vec3::ONE,
+        }
+    }
+
+    pub fn from_xyz(x: f32, y: f32, z: f32) -> Self {
+        Self::from_translation(Vec3::new(x, y, z))
+    }
+
+    #[inline]
+    pub fn compute_matrix(&self) -> Mat4 {
+        Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.position)
+    }
+}
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Default)]
 pub struct GlobalTransform(pub Mat4);
 
-impl Default for GlobalTransform {
-    fn default() -> Self {
-        Self(Mat4::IDENTITY)
+impl GlobalTransform {
+    #[inline]
+    pub fn matrix(&self) -> Mat4 {
+        self.0
+    }
+
+    #[inline]
+    pub fn translation(&self) -> Vec3 {
+        self.0.w_axis.truncate()
     }
 }
 
-// render
+// --- Render Components ---
+
 #[derive(Component, Debug, Clone, PartialEq, Eq, Archive, Serialize, Deserialize)]
 pub struct ModelComponent {
     pub id: AssetId,
@@ -49,15 +78,17 @@ pub struct LightComponent {
     pub color: [f32; 3],
     pub intensity: f32,
     pub range: f32,
-    pub inner_angle: f32, // radians
-    pub outer_angle: f32, // radians
+    pub inner_angle: f32,
+    pub outer_angle: f32,
 }
-// tags
-#[derive(Component, Debug, Clone, Copy)]
-pub struct Static; // entity doesn`t move
 
-#[derive(Component, Debug, Clone, Copy)]
-pub struct Dynamic; // entity updates every frame
+// --- Tags & Gameplay Markers ---
+
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct Static;
+
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct Dynamic;
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct SceneEntity(pub u8);
+pub struct SceneEntity;

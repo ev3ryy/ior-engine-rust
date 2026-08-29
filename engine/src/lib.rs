@@ -49,6 +49,7 @@ struct EngineRunner<A: Application> {
 
     rt: Arc<Runtime>,
     renderer: Option<Renderer>,
+    default_textures: Option<Arc<render::resources::DefaultTextures>>,
     window: Option<Arc<Window>>,
 }
 
@@ -71,12 +72,15 @@ impl<A: Application> EngineRunner<A> {
             }
             tracked.insert(asset_id, file_name.to_string());
         }
-        
-        let Some(renderer) = &self.renderer else { return };
-        
+
+        let (Some(renderer), Some(default_textures)) = (&self.renderer, &self.default_textures) else {
+            return;
+        };
+
         let device = renderer.device.clone();
         let queue = renderer.queue.clone();
         let layout = renderer.material_bind_group_layout.clone();
+        let default_textures = default_textures.clone();
         let server = self.asset_server.clone();
         let file_name_owned = file_name.to_string();
         let tracked_models = self.tracked_models.clone();
@@ -84,25 +88,26 @@ impl<A: Application> EngineRunner<A> {
         self.rt.spawn(async move {
             let server_for_closure = server.clone();
             let file_name_clone = file_name_owned.clone();
-            
+
             let res = server.load(asset::AssetId::from_path(&file_name_owned), move || async move {
                 render::resources::load_binary_model(
                     &file_name_clone,
                     &device,
                     &queue,
                     &layout,
+                    &default_textures,
                     |tex_name, is_srgb| {
                         let tex_name = tex_name.to_string();
                         let dev = device.clone();
                         let q = queue.clone();
-                        let srv = server_for_closure.clone(); 
-                        
+                        let srv = server_for_closure.clone();
+
                         async move {
                             srv.load(asset::AssetId::from_path(&tex_name), move || async move {
                                 let data = render::resources::load_binary(&tex_name).await?;
                                 let tex = render::texture::Texture::from_bytes(&dev, &q, &data, &tex_name, is_srgb)?;
-                                Ok(tex) 
-                            }).await.map_err(|e| anyhow::anyhow!("Asset load error: {}", e)) 
+                                Ok(tex)
+                            }).await.map_err(|e| anyhow::anyhow!("Asset load error: {}", e))
                         }
                     }
                 ).await
@@ -129,19 +134,24 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
 
         if self.window.is_none() {
             let window_attributes = Window::default_attributes()
-            .with_title(self.config.window_title.clone())
-            .with_inner_size(winit::dpi::LogicalSize::new(
-                self.config.window_width,
-                self.config.window_height,
-            ));
+                .with_title(self.config.window_title.clone())
+                .with_inner_size(winit::dpi::LogicalSize::new(
+                    self.config.window_width,
+                    self.config.window_height,
+                ));
 
             let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
             let size = window.inner_size();
 
             let renderer = pollster::block_on(Renderer::new(window.clone(), size.width, size.height, self.config.msaa_samples)).unwrap();
 
+            let default_textures = Arc::new(render::resources::DefaultTextures::new(
+                &renderer.device,
+                &renderer.queue,
+            ));
+
             if size.width > 0 && size.height > 0 {
-                self.camera.aspect = size.width as f32 / size.height as f32
+                self.camera.aspect = size.width as f32 / size.height as f32;
             }
 
             let viewport_id = egui::ViewportId::ROOT;
@@ -154,6 +164,7 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                 None,
             ));
 
+            self.default_textures = Some(default_textures);
             self.renderer = Some(renderer);
             self.window = Some(window.clone());
 
@@ -214,10 +225,12 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                 let mut reloads: Vec<String> = Vec::new();
                 while let Ok(event) = self.asset_events.try_recv() {
                     match event {
-                        AssetEvent::Unloaded { id, .. } => {
+                        AssetEvent::Reloaded { id, .. } | AssetEvent::Unloaded { id, .. } => {
                             let mut tracked = self.tracked_models.lock().unwrap();
                             if let Some(name) = tracked.remove(&id) {
                                 reloads.push(name);
+                            } else if id.has_known_path() {
+                                reloads.push(id.path());
                             }
                         }
                         AssetEvent::Failed { id, error, .. } => {
@@ -317,7 +330,7 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                 self.light_uniforms_cache.clear();
 
                 self.world.each_light(|pos, rot, light| {
-                    let forward = rot.0 * -glam::Vec3::Z;
+                    let forward = rot * -glam::Vec3::Z;
                     let direction = if forward.length_squared() < 1e-6 {
                         glam::Vec3::NEG_Y
                     } else {
@@ -339,7 +352,7 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                     };
 
                     self.light_uniforms_cache.push(LightUniform {
-                        position: pos.0.into(),
+                        position: pos.into(),
                         light_type,
                         color: light.color,
                         intensity: light.intensity,
@@ -398,6 +411,7 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
 
 pub fn run<A: Application>(config: EngineConfig, app: A) -> anyhow::Result<()> {
     let rt = Arc::new(tokio::runtime::Runtime::new()?);
+    let _rt_guard = rt.enter();
 
     let asset_root = asset::resolve_asset_root();
     log::info!("Assets root resolved to: {:?}", asset_root);
@@ -453,6 +467,7 @@ pub fn run<A: Application>(config: EngineConfig, app: A) -> anyhow::Result<()> {
 
         rt,
         renderer: None,
+        default_textures: None,
         window: None,
     };
     

@@ -1,68 +1,103 @@
-use super::{Position, Rotation, Scale, LightComponent, ModelComponent, World};
-use asset::AssetId;
+use super::{
+    Dynamic, GlobalTransform, LightComponent, ModelComponent, SceneEntity, Static, Transform,
+    World,
+};
 use flecs_ecs::prelude::*;
 use glam::{Quat, Vec3};
-use memmap2::Mmap;
-use rkyv::{Archive, Deserialize, Serialize, rancor::Error};
+use rkyv::{rancor::Error, Archive, Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 
-#[derive(Archive, Serialize, Deserialize)]
-pub struct WorldSnapshot {
-    pub entities: Vec<u64>,
-    pub positions: Vec<[f32; 3]>,
-    pub rotations: Vec<[f32; 4]>,
-    pub scales: Vec<[f32; 3]>,
-    pub model_ids: Vec<AssetId>, 
-    pub mesh_indices: Vec<usize>,
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+pub struct SavedTransform {
+    pub position: [f32; 3],
+    pub rotation: [f32; 4],
+    pub scale: [f32; 3],
+}
 
-    pub light_entities: Vec<u64>,
-    pub light_positions: Vec<[f32; 3]>,
-    pub light_rotations: Vec<[f32; 4]>,
-    pub lights: Vec<LightComponent>,
+impl From<Transform> for SavedTransform {
+    fn from(t: Transform) -> Self {
+        Self {
+            position: t.position.to_array(),
+            rotation: t.rotation.to_array(),
+            scale: t.scale.to_array(),
+        }
+    }
+}
+
+impl From<SavedTransform> for Transform {
+    fn from(s: SavedTransform) -> Self {
+        Self {
+            position: Vec3::from_array(s.position),
+            rotation: Quat::from_array(s.rotation),
+            scale: Vec3::from_array(s.scale),
+        }
+    }
+}
+
+#[derive(Archive, Serialize, Deserialize, Debug, Clone)]
+pub struct EntityRecord {
+    pub name: String,
+    pub parent_index: Option<usize>,
+    pub transform: Option<SavedTransform>,
+    pub model: Option<ModelComponent>,
+    pub light: Option<LightComponent>,
+    pub is_static: bool,
+    pub is_dynamic: bool,
+}
+
+#[derive(Archive, Serialize, Deserialize, Debug, Clone)]
+pub struct WorldSnapshot {
+    pub entities: Vec<EntityRecord>,
 }
 
 pub fn save_world(world: &World, path: &str) -> anyhow::Result<()> {
-    let mut entities = Vec::new();
-    let mut positions = Vec::new();
-    let mut rotations = Vec::new();
-    let mut scales = Vec::new();
-    let mut model_ids = Vec::new();
-    let mut mesh_indices = Vec::new();
+    let mut flecs_id_to_index = HashMap::new();
+    let mut entity_ids = Vec::new();
 
-    world.inner.each_entity::<(&Position, &Rotation, &Scale, &ModelComponent)>(|entity, (pos, rot, scale, model)| {
-        entities.push(*entity.id());
-        positions.push(pos.0.to_array());
-        rotations.push(rot.0.to_array());
-        scales.push(scale.0.to_array());
-        model_ids.push(model.id);
-        mesh_indices.push(model.mesh_index);
+    // Запрашиваем через query().with::<Tag>()
+    world.inner.each_entity::<&Transform>(|entity, _| {
+        if entity.has(SceneEntity::id()) {
+            flecs_id_to_index.insert(*entity.id(), entity_ids.len());
+            entity_ids.push(*entity.id());
+        }
     });
 
-    let mut light_entities = Vec::new();
-    let mut light_positions = Vec::new();
-    let mut light_rotations = Vec::new();
-    let mut lights = Vec::new();
+    let mut records = Vec::with_capacity(entity_ids.len());
 
-    world.inner.each_entity::<(&Position, &Rotation, &LightComponent)>(|entity, (pos, rot, light)| {
-        light_entities.push(*entity.id());
-        light_positions.push(pos.0.to_array());
-        light_rotations.push(rot.0.to_array());
-        lights.push(light.clone());
-    });
+    for &id in &entity_ids {
+        let entity = world.inner.entity_from_id(id);
+        let name = entity.get_name().unwrap_or_default();
 
-    let snapshot = WorldSnapshot {
-        entities,
-        positions,
-        rotations,
-        scales,
-        model_ids,
-        mesh_indices,
-        light_entities,
-        light_positions,
-        light_rotations,
-        lights,
-    };
+        let parent_index = entity
+            .parent()
+            .and_then(|p| flecs_id_to_index.get(&*p.id()).copied());
+
+        let mut transform = None;
+        entity.try_get::<&Transform>(|t| transform = Some((*t).into()));
+
+        let mut model = None;
+        entity.try_get::<&ModelComponent>(|m| model = Some(m.clone()));
+
+        let mut light = None;
+        entity.try_get::<&LightComponent>(|l| light = Some(l.clone()));
+
+        let is_static = entity.has(Static::id());
+        let is_dynamic = entity.has(Dynamic::id());
+
+        records.push(EntityRecord {
+            name,
+            parent_index,
+            transform,
+            model,
+            light,
+            is_static,
+            is_dynamic,
+        });
+    }
+
+    let snapshot = WorldSnapshot { entities: records };
 
     let bytes = rkyv::to_bytes::<Error>(&snapshot)
         .map_err(|e| anyhow::anyhow!("Serialization failed: {}", e))?;
@@ -73,60 +108,76 @@ pub fn save_world(world: &World, path: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub struct MappedWorld {
-    _mmap: Mmap,
-}
-
-impl MappedWorld {
-    pub fn load(path: &str) -> anyhow::Result<Self> {
-        let file = File::open(path)?;
-        let mmap = unsafe { Mmap::map(&file)? };
-
-        let _archived = rkyv::access::<<WorldSnapshot as Archive>::Archived, Error>(&mmap)
-            .map_err(|e| anyhow::anyhow!("Invalid binary snapshot format: {}", e))?;
-
-        Ok(Self { _mmap: mmap })
-    }
-
-    pub fn instantiate_into_flecs(&self, world: &World) {
-        let archived = rkyv::access::<<WorldSnapshot as Archive>::Archived, Error>(&self._mmap).unwrap();
-        
-        let snapshot = rkyv::deserialize::<WorldSnapshot, Error>(archived).unwrap();
-
-        let count = snapshot.entities.len();
-
-        for i in 0..count {
-            let p = snapshot.positions[i];
-            let r = snapshot.rotations[i];
-            let s = snapshot.scales[i];
-            let m_id = snapshot.model_ids[i];
-            let m_idx = snapshot.mesh_indices[i];
-
-            world.inner
-                .entity()
-                .set(Position(Vec3::from_array(p)))
-                .set(Rotation(Quat::from_array(r)))
-                .set(Scale(Vec3::from_array(s)))
-                .set(ModelComponent { id: m_id, mesh_index: m_idx })
-                .add(super::Static);
-        }
-
-        let light_count = snapshot.light_entities.len();
-        for i in 0..light_count {
-            world.inner
-                .entity()
-                .set(Position(Vec3::from_array(snapshot.light_positions[i])))
-                .set(Rotation(Quat::from_array(snapshot.light_rotations[i])))
-                .set(snapshot.lights[i].clone())
-                .add(super::Static);
-        }
-    }
-}
-
 pub fn load_world(world: &World, path: &str) -> anyhow::Result<()> {
-    let mapped = MappedWorld::load(path)?;
-    
-    mapped.instantiate_into_flecs(world);
-    
+    let bytes = std::fs::read(path)?;
+    let snapshot = rkyv::from_bytes::<WorldSnapshot, Error>(&bytes)
+        .map_err(|e| anyhow::anyhow!("Deserialization failed: {}", e))?;
+
+    let mut spawned_entities = Vec::with_capacity(snapshot.entities.len());
+
+    for record in &snapshot.entities {
+        let entity = world.inner.entity().add(SceneEntity);
+
+        if !record.name.is_empty() {
+            entity.set_name(&record.name);
+        }
+
+        if let Some(st) = record.transform {
+            entity.set(Transform::from(st));
+        }
+
+        if let Some(m) = &record.model {
+            entity.set(m.clone());
+        }
+
+        if let Some(l) = &record.light {
+            entity.set(l.clone());
+        }
+
+        if record.is_static {
+            entity.add(Static);
+        }
+
+        if record.is_dynamic {
+            entity.add(Dynamic);
+        }
+
+        spawned_entities.push(entity);
+    }
+
+    for (i, record) in snapshot.entities.iter().enumerate() {
+        if let Some(parent_idx) = record.parent_index {
+            if let Some(parent_entity) = spawned_entities.get(parent_idx) {
+                spawned_entities[i].child_of(*parent_entity);
+            }
+        }
+    }
+
+    fn compute_hierarchy(entity: flecs_ecs::core::EntityView, parent_mat: glam::Mat4) {
+        let mut current_mat = parent_mat;
+        entity.try_get::<&Transform>(|t| {
+            current_mat = parent_mat * t.compute_matrix();
+            entity.set(GlobalTransform(current_mat));
+        });
+
+        entity.each_child(|child| {
+            compute_hierarchy(child, current_mat);
+        });
+    }
+
+    for entity in &spawned_entities {
+        if entity.parent().is_none() {
+            let mut root_mat = glam::Mat4::IDENTITY;
+            entity.try_get::<&Transform>(|t| {
+                root_mat = t.compute_matrix();
+                entity.set(GlobalTransform(root_mat));
+            });
+
+            entity.each_child(|child| {
+                compute_hierarchy(child, root_mat);
+            });
+        }
+    }
+
     Ok(())
 }

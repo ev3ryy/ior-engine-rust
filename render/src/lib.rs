@@ -1,7 +1,6 @@
 pub mod model;
 pub mod resources;
 pub mod texture;
-pub mod mipmap;
 pub mod light;
 pub mod shadow;
 pub mod spot_shadow;
@@ -247,7 +246,7 @@ impl Renderer {
 
         let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
             label: None,
-            required_features: wgpu::Features::INDIRECT_FIRST_INSTANCE | wgpu::Features::IMMEDIATES,
+            required_features: wgpu::Features::INDIRECT_FIRST_INSTANCE | wgpu::Features::IMMEDIATES | wgpu::Features::TEXTURE_COMPRESSION_BC,
             experimental_features: wgpu::ExperimentalFeatures::disabled(),
             required_limits: wgpu::Limits::default(),
             memory_hints: Default::default(),
@@ -660,7 +659,7 @@ impl Renderer {
         self.draw_calls_cache.clear();
         self.shadow_system.clear_caches();
 
-        // 1. Prepare Shadows (без единой аллокации в куче)
+        // 1. Prepare Shadows
         self.shadow_system.prepare_shadow_uniforms(
             &self.queue,
             &self.light_cluster.sorted_lights,
@@ -671,7 +670,6 @@ impl Renderer {
 
         let cam_frustum = Frustum::from_view_proj(camera.view_proj);
 
-        // Раздельное заимствование полей ShadowSystem для предотвращения конфликтов Borrow Checker
         let shadow_system::ShadowSystem {
             ref cascade_frustums,
             ref active_spot_frustums,

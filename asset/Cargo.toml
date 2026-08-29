@@ -20,4 +20,4 @@ memmap2 = "0.9.11"
 parcode = "0.6.1"
 notify = "8.2.0"
 serde = { version = "1", features = ["derive"] }
-tokio = { version = "1", features = ["sync"], optional = true }
+tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }

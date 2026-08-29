@@ -16,10 +16,11 @@ asset = {path="../asset"}
 shared = {path="../shared"}
 anyhow = "1.0"
 log = "0.4"
-wgpu = {version = "30.0", features = ["spirv"]}
 rkyv = "0.8"
 egui = "0.36"
 egui-wgpu = "0.36"
+image_dds = "0.7"
+wgpu = {version = "30.0", features = ["spirv"]}
 bytemuck = { version = "1.24", features = ["derive"] }
 glam = {version = "0.33.2", features = ["bytemuck"]}
 tobj = { version = "4.0.4", default-features = false, features = ["async"] }

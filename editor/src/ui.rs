@@ -1,12 +1,23 @@
 use egui::{Context, Ui};
-use ecs::{World, LightType, LightComponent};
-use engine::{EngineMetrics, camera::Camera};
-use transform_gizmo_egui::prelude::*;
-use transform_gizmo_egui::math::{DMat4, DVec3, DQuat, Transform};
+use ecs::{
+    serialization, LightComponent, LightType, ModelComponent, Transform, World,
+};
+use engine::{camera::Camera, EngineMetrics};
 use render::postprocess::{PostProcessSettings, TonemappingMode};
+use transform_gizmo_egui::math::{DMat4, DQuat, DVec3, Transform as GizmoTransform};
+use transform_gizmo_egui::prelude::*;
 use crate::EditorGizmoMode;
 
-fn draw_entity_node(ui: &mut Ui, world: &mut World, entity_id: u64, selected_entity: &mut Option<u64>) {
+fn draw_entity_node(
+    ui: &mut Ui,
+    world: &mut World,
+    entity_id: u64,
+    selected_entity: &mut Option<u64>,
+) {
+    if !world.is_alive(entity_id) {
+        return;
+    }
+
     let is_selected = *selected_entity == Some(entity_id);
     let name = world.get_entity_name(entity_id);
     let display_name = if name.is_empty() {
@@ -15,16 +26,18 @@ fn draw_entity_node(ui: &mut Ui, world: &mut World, entity_id: u64, selected_ent
         name
     };
 
-    let icon = if world.has_light(entity_id) {
+    let has_light = world.has_light(entity_id);
+    let has_model = world.has_model(entity_id);
+
+    let icon = if has_light {
         "💡"
-    } else if world.has_model(entity_id) {
+    } else if has_model {
         "🔷"
     } else {
         "📁"
     };
 
     let header_text = format!("{} {} ({})", icon, display_name, entity_id);
-
     let header_id = ui.make_persistent_id(entity_id);
     let has_children = world.has_children(entity_id);
 
@@ -80,7 +93,7 @@ pub fn draw_postprocess_window(ctx: &Context, pp: &mut PostProcessSettings) {
                 // 1. Tonemapping & Exposure
                 ui.group(|ui| {
                     ui.label(egui::RichText::new("📷 Tonemapping & Exposure").strong());
-                    
+
                     egui::ComboBox::from_label("Tonemap")
                         .selected_text(match pp.tonemapping_mode {
                             TonemappingMode::None => "None (Clamp)",
@@ -204,7 +217,7 @@ pub fn draw_editor_ui(
             });
 
             let (scale, rot, pos) = model_mat.to_scale_rotation_translation();
-            let transform = Transform::from_scale_rotation_translation(
+            let transform = GizmoTransform::from_scale_rotation_translation(
                 DVec3::new(scale.x as f64, scale.y as f64, scale.z as f64),
                 DQuat::from_xyzw(rot.x as f64, rot.y as f64, rot.z as f64, rot.w as f64),
                 DVec3::new(pos.x as f64, pos.y as f64, pos.z as f64),
@@ -234,19 +247,27 @@ pub fn draw_editor_ui(
         }
     }
 
-    // toolbar
+    // Toolbar
     egui::Window::new("Toolbar")
-        .default_pos([10.0, 10.0]) 
-        .title_bar(false) 
+        .default_pos([10.0, 10.0])
+        .title_bar(false)
         .resizable(false)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.menu_button("File", |ui| {
                     if ui.button("Save Scene (F5)").clicked() {
-                        // TODO: saving scene
+                        if let Err(e) = serialization::save_world(world, "res/saved_scene.bin") {
+                            log::error!("Failed to save scene: {e}");
+                        } else {
+                            log::info!("Scene saved to res/saved_scene.bin");
+                        }
                     }
                     if ui.button("Load Scene (F9)").clicked() {
-                        // TODO: loading scene
+                        if let Err(e) = serialization::load_world(world, "res/saved_scene.bin") {
+                            log::error!("Failed to load scene: {e}");
+                        } else {
+                            log::info!("Scene loaded from res/saved_scene.bin");
+                        }
                     }
                     if ui.button("Clear Scene").clicked() {
                         clear_requested = true;
@@ -264,7 +285,8 @@ pub fn draw_editor_ui(
                     }
                     if ui.button("💡 Point Light").clicked() {
                         let id = world.spawn_empty("Point Light");
-                        world.add_transform(id, camera.eye + (camera.target - camera.eye).normalize() * 3.0, glam::Quat::IDENTITY, glam::Vec3::ONE);
+                        let pos = camera.eye + (camera.target - camera.eye).normalize() * 3.0;
+                        world.add_transform(id, Transform::from_translation(pos));
                         world.add_light(id, LightComponent {
                             light_type: LightType::Point,
                             color: [1.0, 1.0, 1.0],
@@ -277,7 +299,13 @@ pub fn draw_editor_ui(
                     }
                     if ui.button("☀️ Directional Light").clicked() {
                         let id = world.spawn_empty("Directional Light");
-                        world.add_transform(id, glam::Vec3::new(0.0, 10.0, 0.0), glam::Quat::from_rotation_x(-0.7), glam::Vec3::ONE);
+                        let pos = glam::Vec3::new(0.0, 10.0, 0.0);
+                        let rot = glam::Quat::from_rotation_x(-0.7);
+                        world.add_transform(id, Transform {
+                            position: pos,
+                            rotation: rot,
+                            scale: glam::Vec3::ONE,
+                        });
                         world.add_light(id, LightComponent {
                             light_type: LightType::Directional,
                             color: [1.0, 0.95, 0.8],
@@ -312,7 +340,7 @@ pub fn draw_editor_ui(
                 ui.separator();
 
                 ui.menu_button("View", |ui| {
-                    ui.checkbox(&mut true, "Show Inspector"); 
+                    ui.checkbox(&mut true, "Show Inspector");
                     ui.checkbox(&mut true, "Show Metrics");
                 });
             });
@@ -349,7 +377,7 @@ pub fn draw_editor_ui(
             });
         });
 
-    // inspector
+    // Inspector
     egui::Window::new("Inspector")
         .default_pos([270.0, 50.0])
         .default_size([300.0, 500.0])
@@ -391,14 +419,14 @@ pub fn draw_editor_ui(
                                 });
                             });
 
-                            world.get_transform_mut(entity_id, |pos, rot, scale| {
+                            world.get_transform_mut(entity_id, |transform| {
                                 ui.horizontal(|ui| {
-                                    ui.add(egui::DragValue::new(&mut pos.0.x).speed(0.1).prefix("X: "));
-                                    ui.add(egui::DragValue::new(&mut pos.0.y).speed(0.1).prefix("Y: "));
-                                    ui.add(egui::DragValue::new(&mut pos.0.z).speed(0.1).prefix("Z: "));
+                                    ui.add(egui::DragValue::new(&mut transform.position.x).speed(0.1).prefix("X: "));
+                                    ui.add(egui::DragValue::new(&mut transform.position.y).speed(0.1).prefix("Y: "));
+                                    ui.add(egui::DragValue::new(&mut transform.position.z).speed(0.1).prefix("Z: "));
                                 });
 
-                                let (rx, ry, rz) = rot.0.to_euler(glam::EulerRot::XYZ);
+                                let (rx, ry, rz) = transform.rotation.to_euler(glam::EulerRot::XYZ);
                                 let mut deg_x = rx.to_degrees();
                                 let mut deg_y = ry.to_degrees();
                                 let mut deg_z = rz.to_degrees();
@@ -411,7 +439,7 @@ pub fn draw_editor_ui(
                                 });
 
                                 if rot_changed {
-                                    rot.0 = glam::Quat::from_euler(
+                                    transform.rotation = glam::Quat::from_euler(
                                         glam::EulerRot::XYZ,
                                         deg_x.to_radians(),
                                         deg_y.to_radians(),
@@ -420,9 +448,9 @@ pub fn draw_editor_ui(
                                 }
 
                                 ui.horizontal(|ui| {
-                                    ui.add(egui::DragValue::new(&mut scale.0.x).speed(0.1).prefix("S_X: "));
-                                    ui.add(egui::DragValue::new(&mut scale.0.y).speed(0.1).prefix("S_Y: "));
-                                    ui.add(egui::DragValue::new(&mut scale.0.z).speed(0.1).prefix("S_Z: "));
+                                    ui.add(egui::DragValue::new(&mut transform.scale.x).speed(0.1).prefix("S_X: "));
+                                    ui.add(egui::DragValue::new(&mut transform.scale.y).speed(0.1).prefix("S_Y: "));
+                                    ui.add(egui::DragValue::new(&mut transform.scale.z).speed(0.1).prefix("S_Z: "));
                                 });
                             });
                         });
@@ -510,7 +538,7 @@ pub fn draw_editor_ui(
                     ui.menu_button("➕ Add Component", |ui| {
                         if !has_transform {
                             if ui.button("📍 Transform").clicked() {
-                                world.add_transform(entity_id, glam::Vec3::ZERO, glam::Quat::IDENTITY, glam::Vec3::ONE);
+                                world.add_transform(entity_id, Transform::default());
                                 ui.close();
                             }
                         }
@@ -541,7 +569,7 @@ pub fn draw_editor_ui(
         });
 
     egui::Window::new("Performance & Camera")
-        .default_pos([600.0, 10.0]) 
+        .default_pos([600.0, 10.0])
         .default_size([250.0, 300.0])
         .show(ctx, |ui| {
             ui.heading("Performance");
