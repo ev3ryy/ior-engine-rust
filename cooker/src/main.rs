@@ -139,7 +139,7 @@ fn cook_single_texture(
 
     let format = match job.semantic {
         TextureSemantic::Albedo | TextureSemantic::Emissive => image_dds::ImageFormat::BC7RgbaUnormSrgb,
-        TextureSemantic::Normal => image_dds::ImageFormat::BC5RgUnorm,
+        TextureSemantic::Normal => image_dds::ImageFormat::BC7RgbaUnorm,
         TextureSemantic::Orm => image_dds::ImageFormat::BC7RgbaUnorm,
     };
 
@@ -359,25 +359,34 @@ fn main() -> Result<()> {
             .unwrap_or_default();
 
         let mut light_idx = None;
+        // crate cooker -> main.rs
+
         if let Some(light) = node.light() {
             let idx = light.index();
 
             if !gltf_light_to_baked.contains_key(&idx) {
-                let (light_type, inner, outer) = match light.kind() {
+                let (light_type, inner, outer, normalized_intensity) = match light.kind() {
                     gltf::khr_lights_punctual::Kind::Directional => {
-                        (BakedLightType::Directional, 0.0, 0.0)
+                        let intensity = light.intensity() / 68.3;
+                        (BakedLightType::Directional, 0.0, 0.0, intensity)
                     }
-                    gltf::khr_lights_punctual::Kind::Point => (BakedLightType::Point, 0.0, 0.0),
+                    gltf::khr_lights_punctual::Kind::Point => {
+                        let intensity = light.intensity() / 54.35;
+                        (BakedLightType::Point, 0.0, 0.0, intensity)
+                    }
                     gltf::khr_lights_punctual::Kind::Spot {
                         inner_cone_angle,
                         outer_cone_angle,
-                    } => (BakedLightType::Spot, inner_cone_angle, outer_cone_angle),
+                    } => {
+                        let intensity = light.intensity() / 54.35;
+                        (BakedLightType::Spot, inner_cone_angle, outer_cone_angle, intensity)
+                    }
                 };
 
                 let baked_light = BakedLight {
                     light_type,
                     color: light.color(),
-                    intensity: light.intensity(),
+                    intensity: normalized_intensity,
                     range: light.range().unwrap_or(50.0),
                     inner_angle: inner,
                     outer_angle: outer,

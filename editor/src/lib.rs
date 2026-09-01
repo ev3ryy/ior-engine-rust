@@ -7,7 +7,7 @@ use engine::camera::{Camera, CameraController, CameraMovement};
 use ecs::World;
 use ecs::serialization::{save_world, load_world};
 use winit::event::{WindowEvent, KeyEvent, ElementState, MouseButton, MouseScrollDelta};
-use winit::keyboard::{KeyCode, PhysicalKey, Key, NamedKey};
+use winit::keyboard::{KeyCode, PhysicalKey};
 use transform_gizmo_egui::prelude::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,6 +22,8 @@ pub struct Editor {
     config: EditorConfig,
     models_to_load: Vec<String>,
     is_rmb_pressed: bool,
+    is_lmb_pressed: bool,
+    is_alt_pressed: bool,
     last_cursor_pos: Option<(f64, f64)>,
     pub selected_entity: Option<u64>,
     pub gizmo: Gizmo,
@@ -35,6 +37,8 @@ impl Editor {
             config,
             models_to_load: Vec::new(),
             is_rmb_pressed: false,
+            is_lmb_pressed: false,
+            is_alt_pressed: false,
             last_cursor_pos: None,
             selected_entity: None,
             gizmo: Gizmo::default(),
@@ -67,107 +71,126 @@ impl Application for Editor {
         event: &WindowEvent,
     ) -> bool {
         match event {
+            // 1. Клавиатура
             WindowEvent::KeyboardInput {
-                event: KeyEvent { physical_key, logical_key, state: key_state, .. },
+                event: KeyEvent { physical_key, state: key_state, repeat, .. },
                 ..
             } => {
                 let pressed = key_state.is_pressed();
 
-                if matches!(physical_key, PhysicalKey::Code(KeyCode::Escape)) || matches!(logical_key, Key::Named(NamedKey::Escape)) {
-                    if pressed {
-                        if self.selected_entity.is_some() {
-                            self.selected_entity = None;
+                // Отслеживаем состояние Alt для навигации на тачпаде
+                if matches!(physical_key, PhysicalKey::Code(KeyCode::AltLeft | KeyCode::AltRight)) {
+                    self.is_alt_pressed = pressed;
+                }
+
+                // Одиночные нажатия (хоткеи)
+                if pressed && !repeat {
+                    match physical_key {
+                        PhysicalKey::Code(KeyCode::Escape) => {
+                            if self.selected_entity.is_some() {
+                                self.selected_entity = None;
+                                return true;
+                            }
+                        }
+                        // Хоткеи гизмо: цифры 1-4 или клавиши E/R/T/G
+                        PhysicalKey::Code(KeyCode::Digit1 | KeyCode::KeyG) => {
+                            self.gizmo_mode = EditorGizmoMode::Translate;
                             return true;
                         }
-                        //std::process::exit(0);
+                        PhysicalKey::Code(KeyCode::Digit2 | KeyCode::KeyE) => {
+                            self.gizmo_mode = EditorGizmoMode::Rotate;
+                            return true;
+                        }
+                        PhysicalKey::Code(KeyCode::Digit3 | KeyCode::KeyR) => {
+                            self.gizmo_mode = EditorGizmoMode::Scale;
+                            return true;
+                        }
+                        PhysicalKey::Code(KeyCode::Digit4 | KeyCode::KeyT) => {
+                            self.gizmo_mode = EditorGizmoMode::All;
+                            return true;
+                        }
+                        PhysicalKey::Code(KeyCode::KeyQ) => {
+                            self.gizmo_orientation = match self.gizmo_orientation {
+                                GizmoOrientation::Global => GizmoOrientation::Local,
+                                GizmoOrientation::Local => GizmoOrientation::Global,
+                            };
+                            return true;
+                        }
+                        PhysicalKey::Code(KeyCode::F5) => {
+                            if let Err(e) = save_world(world, &self.config.world_save_path) {
+                                log::error!("Failed to save world: {}", e);
+                            } else {
+                                log::info!("World saved to {}", self.config.world_save_path);
+                            }
+                            self.config.save("editor.cfg");
+                            return true;
+                        }
+                        PhysicalKey::Code(KeyCode::F9) => {
+                            *world = ecs::create_world();
+                            self.selected_entity = None;
+
+                            if let Err(e) = load_world(world, &self.config.world_save_path) {
+                                log::error!("Failed to load world: {}", e);
+                            } else {
+                                log::info!("World loaded from {}", self.config.world_save_path);
+                                world.inner.each::<&ecs::components::ModelComponent>(|model_comp| {
+                                    self.models_to_load.push(model_comp.id.path());
+                                });
+                            }
+                            self.config = EditorConfig::load("editor.cfg");
+                            return true;
+                        }
+                        _ => {}
                     }
                 }
 
-                if pressed && !self.is_rmb_pressed {
-                    let is_key_e = matches!(physical_key, PhysicalKey::Code(KeyCode::KeyE))
-                        || matches!(logical_key, Key::Character(c) if c.eq_ignore_ascii_case("e") || c == "у" || c == "У");
-                    let is_key_r = matches!(physical_key, PhysicalKey::Code(KeyCode::KeyR))
-                        || matches!(logical_key, Key::Character(c) if c.eq_ignore_ascii_case("r") || c == "к" || c == "К");
-                    let is_key_t = matches!(physical_key, PhysicalKey::Code(KeyCode::KeyT))
-                        || matches!(logical_key, Key::Character(c) if c.eq_ignore_ascii_case("t") || c == "е" || c == "Е");
-                    let is_key_q = matches!(physical_key, PhysicalKey::Code(KeyCode::KeyQ))
-                        || matches!(logical_key, Key::Character(c) if c.eq_ignore_ascii_case("q") || c == "й" || c == "Й");
-
-                    if is_key_e { self.gizmo_mode = EditorGizmoMode::Rotate; }
-                    if is_key_r { self.gizmo_mode = EditorGizmoMode::Scale; }
-                    if is_key_t { self.gizmo_mode = EditorGizmoMode::All; }
-                    if is_key_q {
-                        self.gizmo_orientation = match self.gizmo_orientation {
-                            GizmoOrientation::Global => GizmoOrientation::Local,
-                            GizmoOrientation::Local => GizmoOrientation::Global,
-                        };
+                // Полет камеры: WASD + Space/Shift
+                let mut is_movement = true;
+                match physical_key {
+                    PhysicalKey::Code(KeyCode::KeyW | KeyCode::ArrowUp) => {
+                        camera_controller.apply_movement(CameraMovement::Forward(pressed));
+                    }
+                    PhysicalKey::Code(KeyCode::KeyS | KeyCode::ArrowDown) => {
+                        camera_controller.apply_movement(CameraMovement::Backward(pressed));
+                    }
+                    PhysicalKey::Code(KeyCode::KeyA | KeyCode::ArrowLeft) => {
+                        camera_controller.apply_movement(CameraMovement::Left(pressed));
+                    }
+                    PhysicalKey::Code(KeyCode::KeyD | KeyCode::ArrowRight) => {
+                        camera_controller.apply_movement(CameraMovement::Right(pressed));
+                    }
+                    PhysicalKey::Code(KeyCode::Space) => {
+                        camera_controller.apply_movement(CameraMovement::Up(pressed));
+                    }
+                    PhysicalKey::Code(KeyCode::ShiftLeft | KeyCode::ShiftRight) => {
+                        camera_controller.apply_movement(CameraMovement::Down(pressed));
+                    }
+                    _ => {
+                        is_movement = false;
                     }
                 }
 
-                let is_forward = matches!(physical_key, PhysicalKey::Code(KeyCode::KeyW | KeyCode::ArrowUp))
-                    || matches!(logical_key, Key::Character(c) if c.eq_ignore_ascii_case("w") || c == "ц" || c == "Ц")
-                    || matches!(logical_key, Key::Named(NamedKey::ArrowUp));
-
-                let is_backward = matches!(physical_key, PhysicalKey::Code(KeyCode::KeyS | KeyCode::ArrowDown))
-                    || matches!(logical_key, Key::Character(c) if c.eq_ignore_ascii_case("s") || c == "ы" || c == "Ы")
-                    || matches!(logical_key, Key::Named(NamedKey::ArrowDown));
-
-                let is_left = matches!(physical_key, PhysicalKey::Code(KeyCode::KeyA | KeyCode::ArrowLeft))
-                    || matches!(logical_key, Key::Character(c) if c.eq_ignore_ascii_case("a") || c == "ф" || c == "Ф")
-                    || matches!(logical_key, Key::Named(NamedKey::ArrowLeft));
-
-                let is_right = matches!(physical_key, PhysicalKey::Code(KeyCode::KeyD | KeyCode::ArrowRight))
-                    || matches!(logical_key, Key::Character(c) if c.eq_ignore_ascii_case("d") || c == "в" || c == "В")
-                    || matches!(logical_key, Key::Named(NamedKey::ArrowRight));
-
-                let is_up = matches!(physical_key, PhysicalKey::Code(KeyCode::Space))
-                    || matches!(logical_key, Key::Named(NamedKey::Space));
-
-                let is_down = matches!(physical_key, PhysicalKey::Code(KeyCode::ShiftLeft | KeyCode::ShiftRight))
-                    || matches!(logical_key, Key::Named(NamedKey::Shift));
-
-                if is_forward { camera_controller.apply_movement(CameraMovement::Forward(pressed)); }
-                if is_backward { camera_controller.apply_movement(CameraMovement::Backward(pressed)); }
-                if is_left { camera_controller.apply_movement(CameraMovement::Left(pressed)); }
-                if is_right { camera_controller.apply_movement(CameraMovement::Right(pressed)); }
-                if is_up { camera_controller.apply_movement(CameraMovement::Up(pressed)); }
-                if is_down { camera_controller.apply_movement(CameraMovement::Down(pressed)); }
-
-                if pressed && matches!(physical_key, PhysicalKey::Code(KeyCode::F5)) {
-                    if let Err(e) = save_world(world, &self.config.world_save_path) {
-                        log::error!("Failed to save world: {}", e);
-                    } else {
-                        log::info!("World saved to {}", self.config.world_save_path);
-                    }
-                    self.config.save("editor.cfg");
-                }
-
-                if pressed && matches!(physical_key, PhysicalKey::Code(KeyCode::F9)) {
-                    *world = ecs::create_world();
-                    self.selected_entity = None;
-
-                    if let Err(e) = load_world(world, &self.config.world_save_path) {
-                        log::error!("Failed to load world: {}", e);
-                    } else {
-                        log::info!("World loaded from {}", self.config.world_save_path);
-                        world.inner.each::<&ecs::components::ModelComponent>(|model_comp| {
-                            self.models_to_load.push(model_comp.id.path());
-                        });
-                    }
-                    self.config = EditorConfig::load("editor.cfg");
-                }
-
-                true
+                is_movement
             }
 
-            WindowEvent::MouseInput { state, button: MouseButton::Right, .. } => {
-                self.is_rmb_pressed = *state == ElementState::Pressed;
+            // 2. Кнопки мыши (ЛКМ и ПКМ)
+            WindowEvent::MouseInput { state, button, .. } => {
+                let pressed = *state == ElementState::Pressed;
+                match button {
+                    MouseButton::Right => self.is_rmb_pressed = pressed,
+                    MouseButton::Left => self.is_lmb_pressed = pressed,
+                    _ => {}
+                }
                 false
             }
 
+            // 3. Перемещение курсора (ПКМ драг ИЛИ Alt + ЛКМ драг на тачпаде)
             WindowEvent::CursorMoved { position, .. } => {
                 let mut consumed = false;
-                if self.is_rmb_pressed {
+                // Вращаем камеру, если зажат ПКМ (мышь) ИЛИ зажат Alt + ЛКМ (тачпад ноутбука)
+                let should_rotate = self.is_rmb_pressed || (self.is_alt_pressed && self.is_lmb_pressed);
+
+                if should_rotate {
                     if let Some((last_x, last_y)) = self.last_cursor_pos {
                         let dx = (position.x - last_x) as f32;
                         let dy = (position.y - last_y) as f32;
@@ -179,6 +202,7 @@ impl Application for Editor {
                 consumed
             }
 
+            // 4. Свайп двумя пальцами на тачпаде (PixelDelta и LineDelta для Linux)
             WindowEvent::MouseWheel { delta, .. } => {
                 match delta {
                     MouseScrollDelta::PixelDelta(pos) => {
@@ -186,13 +210,23 @@ impl Application for Editor {
                         let dy = -pos.y as f32 * 0.5;
                         camera_controller.apply_movement(CameraMovement::Rotate { dx, dy });
                     }
-                    MouseScrollDelta::LineDelta(_x, y) => {
-                        camera_controller.apply_movement(CameraMovement::Zoom(*y * 20.0));
+                    MouseScrollDelta::LineDelta(x, y) => {
+                        // На Linux тачпад шлет LineDelta:
+                        if x.abs() > 0.001 || (self.is_alt_pressed && y.abs() > 0.001) {
+                            // Если есть горизонтальный скролл или зажат Alt — вращаем камеру
+                            let dx = *x * 15.0;
+                            let dy = -*y * 15.0;
+                            camera_controller.apply_movement(CameraMovement::Rotate { dx, dy });
+                        } else {
+                            // Обычный вертикальный скролл — зум
+                            camera_controller.apply_movement(CameraMovement::Zoom(*y * 20.0));
+                        }
                     }
                 }
                 false
             }
 
+            // 5. Жест Pinch (зум)
             WindowEvent::PinchGesture { delta, .. } => {
                 camera_controller.apply_movement(CameraMovement::Zoom(*delta as f32 * 3000.0));
                 false

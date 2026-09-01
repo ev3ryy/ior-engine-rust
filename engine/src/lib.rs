@@ -180,21 +180,11 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
         _window_id: winit::window::WindowId,
         event: WindowEvent,
     ) {
-        if self.app.on_window_event(&mut self.world, &mut self.camera, &mut self.camera_controller, &event) {
-            return;
-        }
-
-        if let Some(egui_state) = &mut self.egui_state {
-            if let Some(window) = &self.window {
-                let response = egui_state.on_window_event(window.as_ref(), &event);
-                if response.consumed {
-                    return;
-                }
+        match &event {
+            WindowEvent::CloseRequested => {
+                event_loop.exit();
+                return;
             }
-        }
-
-        match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
                 if size.width > 0 && size.height > 0 {
                     self.camera.aspect = size.width as f32 / size.height as f32;
@@ -204,6 +194,25 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                     self.app.on_resize(size.width, size.height);
                 }
             }
+            _ => {}
+        }
+
+        if let Some(egui_state) = &mut self.egui_state {
+            if let Some(window) = &self.window {
+                let _ = egui_state.on_window_event(window.as_ref(), &event);
+            }
+        }
+
+        let is_typing_in_ui = matches!(&event, WindowEvent::KeyboardInput { .. }) 
+            && self.egui_ctx.egui_wants_keyboard_input();
+
+        if !is_typing_in_ui {
+            if self.app.on_window_event(&mut self.world, &mut self.camera, &mut self.camera_controller, &event) {
+                return;
+            }
+        }
+
+        match event {
             WindowEvent::RedrawRequested => {
                 let now = std::time::Instant::now();
                 self.metrics.frame_time_ms = now.duration_since(self.last_frame_time).as_secs_f32() * 1000.0;
