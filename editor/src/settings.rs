@@ -50,7 +50,7 @@ impl Default for EditorConfig {
             msaa_samples: 1,
             initial_grid_rows: 10,
             initial_grid_spacing: 3.0,
-            world_save_path: "world.bin".to_string(),
+            world_save_path: "world.ron".to_string(),
             postprocess: PostProcessSettings {
                 grain_enabled: false,
                 grain_intensity: 0.015,

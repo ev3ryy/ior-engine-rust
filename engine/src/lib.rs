@@ -1,5 +1,6 @@
 pub mod app;
 pub mod camera;
+pub mod game;
 
 use std::sync::Arc;
 use tokio::runtime::Runtime;
@@ -266,7 +267,27 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                 // 2. engine: update camera matrices
                 self.camera_controller.update_camera(&mut self.camera, dt);
 
-                let camera_uniform = self.camera.build_uniform(); 
+                let camera_uniform = if self.app.is_in_play_mode() {
+                    if let Some((cam_pos, cam_rot, cam_comp)) = self.world.get_active_game_camera() {
+                        let forward = cam_rot * -glam::Vec3::Z;
+                        let up = cam_rot * glam::Vec3::Y;
+                        let target = cam_pos + forward;
+                        let game_cam = camera::Camera {
+                            eye: cam_pos,
+                            target,
+                            up,
+                            aspect: self.camera.aspect,
+                            fovy: cam_comp.fovy,
+                            znear: cam_comp.znear,
+                            zfar: cam_comp.zfar,
+                        };
+                        game_cam.build_uniform()
+                    } else {
+                        self.camera.build_uniform()
+                    }
+                } else {
+                    self.camera.build_uniform()
+                };
 
                 if let Some(renderer) = &mut self.renderer {
                     renderer.upload_camera(camera_uniform);

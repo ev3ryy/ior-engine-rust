@@ -90,7 +90,7 @@ pub async fn load_texture(
 pub async fn load_binary_model<F, Fut>(
     file_name: &str,
     device: &wgpu::Device,
-    queue: &wgpu::Queue,
+    _queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
     default_textures: &DefaultTextures,
     mut load_texture_callback: F,

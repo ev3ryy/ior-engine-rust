@@ -1,12 +1,147 @@
 use egui::{Context, Ui};
 use ecs::{
-    serialization, LightComponent, LightType, ModelComponent, Transform, World,
+    serialization, CameraComponent, FieldVisitor, LightComponent, LightType,
+    Transform, World,
 };
-use engine::{camera::Camera, EngineMetrics};
+use engine::{camera::Camera, EngineMetrics, game::PlayState};
 use render::postprocess::{PostProcessSettings, TonemappingMode};
 use transform_gizmo_egui::math::{DMat4, DQuat, DVec3, Transform as GizmoTransform};
 use transform_gizmo_egui::prelude::*;
 use crate::EditorGizmoMode;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlayControlAction {
+    None,
+    Start,
+    Simulate,
+    Stop,
+    Pause,
+    Resume,
+    Step,
+}
+
+struct EguiFieldVisitor<'a> {
+    ui: &'a mut egui::Ui,
+    changed: bool,
+}
+
+impl<'a> FieldVisitor for EguiFieldVisitor<'a> {
+    fn visit_f32(&mut self, name: &'static str, val: &mut f32, meta: &ecs::FieldMeta) {
+        let speed = meta.speed.unwrap_or(0.1);
+        if let Some((min, max)) = meta.range {
+            self.changed |= self.ui.add(egui::Slider::new(val, min..=max).text(name)).changed();
+        } else {
+            self.changed |= self.ui.add(egui::DragValue::new(val).speed(speed).prefix(format!("{}: ", name))).changed();
+        }
+    }
+
+    fn visit_f64(&mut self, name: &'static str, val: &mut f64, meta: &ecs::FieldMeta) {
+        let speed = meta.speed.unwrap_or(0.1) as f64;
+        self.changed |= self.ui.add(egui::DragValue::new(val).speed(speed).prefix(format!("{}: ", name))).changed();
+    }
+
+    fn visit_i32(&mut self, name: &'static str, val: &mut i32, meta: &ecs::FieldMeta) {
+        let speed = meta.speed.unwrap_or(1.0);
+        if let Some((min, max)) = meta.range {
+            self.changed |= self.ui.add(egui::Slider::new(val, (min as i32)..=(max as i32)).text(name)).changed();
+        } else {
+            self.changed |= self.ui.add(egui::DragValue::new(val).speed(speed).prefix(format!("{}: ", name))).changed();
+        }
+    }
+
+    fn visit_u32(&mut self, name: &'static str, val: &mut u32, meta: &ecs::FieldMeta) {
+        let speed = meta.speed.unwrap_or(1.0);
+        self.changed |= self.ui.add(egui::DragValue::new(val).speed(speed).prefix(format!("{}: ", name))).changed();
+    }
+
+    fn visit_usize(&mut self, name: &'static str, val: &mut usize, meta: &ecs::FieldMeta) {
+        let speed = meta.speed.unwrap_or(1.0);
+        self.changed |= self.ui.add(egui::DragValue::new(val).speed(speed).prefix(format!("{}: ", name))).changed();
+    }
+
+    fn visit_bool(&mut self, name: &'static str, val: &mut bool, _meta: &ecs::FieldMeta) {
+        self.changed |= self.ui.checkbox(val, name).changed();
+    }
+
+    fn visit_string(&mut self, name: &'static str, val: &mut String, _meta: &ecs::FieldMeta) {
+        self.ui.horizontal(|ui| {
+            ui.label(format!("{}:", name));
+            self.changed |= ui.text_edit_singleline(val).changed();
+        });
+    }
+
+    fn visit_vec2(&mut self, name: &'static str, val: &mut glam::Vec2, meta: &ecs::FieldMeta) {
+        let speed = meta.speed.unwrap_or(0.1);
+        self.ui.horizontal(|ui| {
+            ui.label(format!("{}:", name));
+            self.changed |= ui.add(egui::DragValue::new(&mut val.x).speed(speed).prefix("X: ")).changed();
+            self.changed |= ui.add(egui::DragValue::new(&mut val.y).speed(speed).prefix("Y: ")).changed();
+        });
+    }
+
+    fn visit_vec3(&mut self, name: &'static str, val: &mut glam::Vec3, meta: &ecs::FieldMeta) {
+        let speed = meta.speed.unwrap_or(0.1);
+        self.ui.horizontal(|ui| {
+            ui.label(format!("{}:", name));
+            self.changed |= ui.add(egui::DragValue::new(&mut val.x).speed(speed).prefix("X: ")).changed();
+            self.changed |= ui.add(egui::DragValue::new(&mut val.y).speed(speed).prefix("Y: ")).changed();
+            self.changed |= ui.add(egui::DragValue::new(&mut val.z).speed(speed).prefix("Z: ")).changed();
+        });
+    }
+
+    fn visit_vec4(&mut self, name: &'static str, val: &mut glam::Vec4, meta: &ecs::FieldMeta) {
+        let speed = meta.speed.unwrap_or(0.1);
+        self.ui.horizontal(|ui| {
+            ui.label(format!("{}:", name));
+            self.changed |= ui.add(egui::DragValue::new(&mut val.x).speed(speed).prefix("X: ")).changed();
+            self.changed |= ui.add(egui::DragValue::new(&mut val.y).speed(speed).prefix("Y: ")).changed();
+            self.changed |= ui.add(egui::DragValue::new(&mut val.z).speed(speed).prefix("Z: ")).changed();
+            self.changed |= ui.add(egui::DragValue::new(&mut val.w).speed(speed).prefix("W: ")).changed();
+        });
+    }
+
+    fn visit_quat(&mut self, name: &'static str, val: &mut glam::Quat, _meta: &ecs::FieldMeta) {
+        let (rx, ry, rz) = val.to_euler(glam::EulerRot::XYZ);
+        let mut deg_x = rx.to_degrees();
+        let mut deg_y = ry.to_degrees();
+        let mut deg_z = rz.to_degrees();
+
+        let mut rot_changed = false;
+        self.ui.horizontal(|ui| {
+            ui.label(format!("{}:", name));
+            rot_changed |= ui.add(egui::DragValue::new(&mut deg_x).speed(0.5).prefix("R_X: ").suffix("°")).changed();
+            rot_changed |= ui.add(egui::DragValue::new(&mut deg_y).speed(0.5).prefix("R_Y: ").suffix("°")).changed();
+            rot_changed |= ui.add(egui::DragValue::new(&mut deg_z).speed(0.5).prefix("R_Z: ").suffix("°")).changed();
+        });
+
+        if rot_changed {
+            *val = glam::Quat::from_euler(
+                glam::EulerRot::XYZ,
+                deg_x.to_radians(),
+                deg_y.to_radians(),
+                deg_z.to_radians(),
+            );
+            self.changed = true;
+        }
+    }
+
+    fn visit_color3(&mut self, name: &'static str, val: &mut [f32; 3], _meta: &ecs::FieldMeta) {
+        self.ui.horizontal(|ui| {
+            ui.label(format!("{}:", name));
+            self.changed |= ui.color_edit_button_rgb(val).changed();
+        });
+    }
+
+    fn visit_f32_slice(&mut self, name: &'static str, val: &mut [f32; 3], meta: &ecs::FieldMeta) {
+        let speed = meta.speed.unwrap_or(0.1);
+        self.ui.horizontal(|ui| {
+            ui.label(format!("{}:", name));
+            self.changed |= ui.add(egui::DragValue::new(&mut val[0]).speed(speed).prefix("0: ")).changed();
+            self.changed |= ui.add(egui::DragValue::new(&mut val[1]).speed(speed).prefix("1: ")).changed();
+            self.changed |= ui.add(egui::DragValue::new(&mut val[2]).speed(speed).prefix("2: ")).changed();
+        });
+    }
+}
 
 fn draw_entity_node(
     ui: &mut Ui,
@@ -28,11 +163,14 @@ fn draw_entity_node(
 
     let has_light = world.has_light(entity_id);
     let has_model = world.has_model(entity_id);
+    let has_camera = world.has_camera(entity_id);
 
     let icon = if has_light {
         "💡"
     } else if has_model {
         "🔷"
+    } else if has_camera {
+        "📷"
     } else {
         "📁"
     };
@@ -90,10 +228,8 @@ pub fn draw_postprocess_window(ctx: &Context, pp: &mut PostProcessSettings) {
             }
 
             egui::ScrollArea::vertical().show(ui, |ui| {
-                // 1. Tonemapping & Exposure
                 ui.group(|ui| {
                     ui.label(egui::RichText::new("📷 Tonemapping & Exposure").strong());
-
                     egui::ComboBox::from_label("Tonemap")
                         .selected_text(match pp.tonemapping_mode {
                             TonemappingMode::None => "None (Clamp)",
@@ -111,7 +247,6 @@ pub fn draw_postprocess_window(ctx: &Context, pp: &mut PostProcessSettings) {
                 });
                 ui.add_space(5.0);
 
-                // 2. Bloom
                 ui.group(|ui| {
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new("✨ Bloom (Dual Filtering)").strong());
@@ -129,7 +264,6 @@ pub fn draw_postprocess_window(ctx: &Context, pp: &mut PostProcessSettings) {
                 });
                 ui.add_space(5.0);
 
-                // 3. Color Grading
                 ui.group(|ui| {
                     ui.label(egui::RichText::new("🎨 Color Grading").strong());
                     ui.add(egui::Slider::new(&mut pp.contrast, 0.5..=2.0).text("Contrast"));
@@ -137,7 +271,6 @@ pub fn draw_postprocess_window(ctx: &Context, pp: &mut PostProcessSettings) {
                 });
                 ui.add_space(5.0);
 
-                // 4. Vignette
                 ui.group(|ui| {
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new("⭕ Vignette").strong());
@@ -154,7 +287,6 @@ pub fn draw_postprocess_window(ctx: &Context, pp: &mut PostProcessSettings) {
                 });
                 ui.add_space(5.0);
 
-                // 5. Film Grain
                 ui.group(|ui| {
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new("🎞 Film Grain").strong());
@@ -182,68 +314,72 @@ pub fn draw_editor_ui(
     gizmo: &mut Gizmo,
     gizmo_mode: &mut EditorGizmoMode,
     gizmo_orientation: &mut GizmoOrientation,
+    play_state: PlayState,
+    play_action: &mut PlayControlAction,
 ) {
     let mut clear_requested = false;
 
     draw_postprocess_window(ctx, postprocess);
 
-    // 3D Transform Gizmo Viewport
-    if let Some(entity_id) = *selected_entity {
-        if let Some(model_mat) = world.get_global_transform(entity_id) {
-            let eye = DVec3::new(camera.eye.x as f64, camera.eye.y as f64, camera.eye.z as f64);
-            let target = DVec3::new(camera.target.x as f64, camera.target.y as f64, camera.target.z as f64);
-            let up = DVec3::new(camera.up.x as f64, camera.up.y as f64, camera.up.z as f64);
+    // 3D Transform Gizmo Viewport (только в режиме редактирования)
+    if play_state != PlayState::Playing {
+        if let Some(entity_id) = *selected_entity {
+            if let Some(model_mat) = world.get_global_transform(entity_id) {
+                let eye = DVec3::new(camera.eye.x as f64, camera.eye.y as f64, camera.eye.z as f64);
+                let target = DVec3::new(camera.target.x as f64, camera.target.y as f64, camera.target.z as f64);
+                let up = DVec3::new(camera.up.x as f64, camera.up.y as f64, camera.up.z as f64);
 
-            let view_mat = DMat4::look_at_rh(eye, target, up);
-            let proj_mat = DMat4::perspective_infinite_rh(
-                (camera.fovy as f64).to_radians(),
-                camera.aspect as f64,
-                camera.znear as f64,
-            );
+                let view_mat = DMat4::look_at_rh(eye, target, up);
+                let proj_mat = DMat4::perspective_infinite_rh(
+                    (camera.fovy as f64).to_radians(),
+                    camera.aspect as f64,
+                    camera.znear as f64,
+                );
 
-            let modes: EnumSet<GizmoMode> = match gizmo_mode {
-                EditorGizmoMode::Translate => GizmoMode::all().into_iter().filter(|m| m.is_translate()).collect(),
-                EditorGizmoMode::Rotate => GizmoMode::all().into_iter().filter(|m| m.is_rotate()).collect(),
-                EditorGizmoMode::Scale => GizmoMode::all().into_iter().filter(|m| m.is_scale()).collect(),
-                EditorGizmoMode::All => GizmoMode::all(),
-            };
+                let modes: EnumSet<GizmoMode> = match gizmo_mode {
+                    EditorGizmoMode::Translate => GizmoMode::all().into_iter().filter(|m| m.is_translate()).collect(),
+                    EditorGizmoMode::Rotate => GizmoMode::all().into_iter().filter(|m| m.is_rotate()).collect(),
+                    EditorGizmoMode::Scale => GizmoMode::all().into_iter().filter(|m| m.is_scale()).collect(),
+                    EditorGizmoMode::All => GizmoMode::all(),
+                };
 
-            gizmo.update_config(GizmoConfig {
-                view_matrix: view_mat.into(),
-                projection_matrix: proj_mat.into(),
-                modes,
-                orientation: *gizmo_orientation,
-                ..Default::default()
-            });
-
-            let (scale, rot, pos) = model_mat.to_scale_rotation_translation();
-            let transform = GizmoTransform::from_scale_rotation_translation(
-                DVec3::new(scale.x as f64, scale.y as f64, scale.z as f64),
-                DQuat::from_xyzw(rot.x as f64, rot.y as f64, rot.z as f64, rot.w as f64),
-                DVec3::new(pos.x as f64, pos.y as f64, pos.z as f64),
-            );
-
-            egui::Area::new(egui::Id::new("gizmo_viewport"))
-                .order(egui::Order::Background)
-                .fixed_pos([0.0, 0.0])
-                .show(ctx, |ui| {
-                    if let Some((_result, new_transforms)) = gizmo.interact(ui, &[transform]) {
-                        if let Some(new_t) = new_transforms.first() {
-                            let s = new_t.scale;
-                            let r = new_t.rotation;
-                            let p = new_t.translation;
-
-                            let new_global = glam::Mat4::from_scale_rotation_translation(
-                                glam::Vec3::new(s.x as f32, s.y as f32, s.z as f32),
-                                glam::Quat::from_xyzw(r.v.x as f32, r.v.y as f32, r.v.z as f32, r.s as f32),
-                                glam::Vec3::new(p.x as f32, p.y as f32, p.z as f32),
-                            );
-
-                            world.set_transform_from_global_matrix(entity_id, new_global);
-                            world.update_transforms();
-                        }
-                    }
+                gizmo.update_config(GizmoConfig {
+                    view_matrix: view_mat.into(),
+                    projection_matrix: proj_mat.into(),
+                    modes,
+                    orientation: *gizmo_orientation,
+                    ..Default::default()
                 });
+
+                let (scale, rot, pos) = model_mat.to_scale_rotation_translation();
+                let transform = GizmoTransform::from_scale_rotation_translation(
+                    DVec3::new(scale.x as f64, scale.y as f64, scale.z as f64),
+                    DQuat::from_xyzw(rot.x as f64, rot.y as f64, rot.z as f64, rot.w as f64),
+                    DVec3::new(pos.x as f64, pos.y as f64, pos.z as f64),
+                );
+
+                egui::Area::new(egui::Id::new("gizmo_viewport"))
+                    .order(egui::Order::Background)
+                    .fixed_pos([0.0, 0.0])
+                    .show(ctx, |ui| {
+                        if let Some((_result, new_transforms)) = gizmo.interact(ui, &[transform]) {
+                            if let Some(new_t) = new_transforms.first() {
+                                let s = new_t.scale;
+                                let r = new_t.rotation;
+                                let p = new_t.translation;
+
+                                let new_global = glam::Mat4::from_scale_rotation_translation(
+                                    glam::Vec3::new(s.x as f32, s.y as f32, s.z as f32),
+                                    glam::Quat::from_xyzw(r.v.x as f32, r.v.y as f32, r.v.z as f32, r.s as f32),
+                                    glam::Vec3::new(p.x as f32, p.y as f32, p.z as f32),
+                                );
+
+                                world.set_transform_from_global_matrix(entity_id, new_global);
+                                world.update_transforms();
+                            }
+                        }
+                    });
+            }
         }
     }
 
@@ -254,6 +390,37 @@ pub fn draw_editor_ui(
         .resizable(false)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
+                let is_running = matches!(play_state, PlayState::Playing | PlayState::Simulating);
+                let is_paused = matches!(play_state, PlayState::Paused { .. });
+
+                if is_running || is_paused {
+                    if ui.button(egui::RichText::new("⏹ Stop").color(egui::Color32::LIGHT_RED)).clicked() {
+                        *play_action = PlayControlAction::Stop;
+                    }
+                    if ui.button(if is_paused { "▶ Resume" } else { "⏸ Pause" }).clicked() {
+                        *play_action = if is_paused { PlayControlAction::Resume } else { PlayControlAction::Pause };
+                    }
+                    if is_paused && ui.button("⏭ Step").clicked() {
+                        *play_action = PlayControlAction::Step;
+                    }
+
+                    ui.separator();
+                    if play_state == PlayState::Simulating {
+                        ui.label(egui::RichText::new("⚡ SIMULATING").color(egui::Color32::from_rgb(100, 200, 255)).strong());
+                    } else if play_state == PlayState::Playing {
+                        ui.label(egui::RichText::new("🎮 PLAYING").color(egui::Color32::from_rgb(100, 255, 100)).strong());
+                    }
+                } else {
+                    if ui.button(egui::RichText::new("▶ Play").color(egui::Color32::GREEN)).on_hover_text("Play from Game Camera with Game Controls").clicked() {
+                        *play_action = PlayControlAction::Start;
+                    }
+                    if ui.button(egui::RichText::new("⚡ Simulate").color(egui::Color32::from_rgb(100, 200, 255))).on_hover_text("Run scripts & physics while retaining Editor Camera & Tools").clicked() {
+                        *play_action = PlayControlAction::Simulate;
+                    }
+                }
+
+                ui.separator();
+
                 ui.menu_button("File", |ui| {
                     if ui.button("Save Scene (F5)").clicked() {
                         if let Err(e) = serialization::save_world(world, "res/saved_scene.bin") {
@@ -266,6 +433,7 @@ pub fn draw_editor_ui(
                         if let Err(e) = serialization::load_world(world, "res/saved_scene.bin") {
                             log::error!("Failed to load scene: {e}");
                         } else {
+                            *selected_entity = None;
                             log::info!("Scene loaded from res/saved_scene.bin");
                         }
                     }
@@ -281,6 +449,13 @@ pub fn draw_editor_ui(
                 ui.menu_button("➕ Spawn", |ui| {
                     if ui.button("Empty Entity").clicked() {
                         let id = world.spawn_empty("Empty Entity");
+                        *selected_entity = Some(id);
+                    }
+                    if ui.button("📷 Camera").clicked() {
+                        let id = world.spawn_empty("Camera");
+                        let pos = camera.eye;
+                        world.add_transform(id, Transform::from_translation(pos));
+                        world.add_camera(id, CameraComponent::default());
                         *selected_entity = Some(id);
                     }
                     if ui.button("💡 Point Light").clicked() {
@@ -377,7 +552,7 @@ pub fn draw_editor_ui(
             });
         });
 
-    // Inspector
+    // Inspector Window
     egui::Window::new("Inspector")
         .default_pos([270.0, 50.0])
         .default_size([300.0, 500.0])
@@ -388,7 +563,6 @@ pub fn draw_editor_ui(
                     return;
                 }
 
-                // Header & Name
                 ui.horizontal(|ui| {
                     let mut name = world.get_entity_name(entity_id);
                     if ui.text_edit_singleline(&mut name).changed() {
@@ -404,10 +578,11 @@ pub fn draw_editor_ui(
 
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     let has_transform = world.has_transform(entity_id);
+                    let has_camera = world.has_camera(entity_id);
                     let has_light = world.has_light(entity_id);
                     let has_model = world.has_model(entity_id);
 
-                    // 1. TRANSFORM COMPONENT
+                    // transform
                     if has_transform {
                         ui.group(|ui| {
                             ui.horizontal(|ui| {
@@ -419,11 +594,13 @@ pub fn draw_editor_ui(
                                 });
                             });
 
+                            let mut transform_changed = false;
+
                             world.get_transform_mut(entity_id, |transform| {
                                 ui.horizontal(|ui| {
-                                    ui.add(egui::DragValue::new(&mut transform.position.x).speed(0.1).prefix("X: "));
-                                    ui.add(egui::DragValue::new(&mut transform.position.y).speed(0.1).prefix("Y: "));
-                                    ui.add(egui::DragValue::new(&mut transform.position.z).speed(0.1).prefix("Z: "));
+                                    transform_changed |= ui.add(egui::DragValue::new(&mut transform.position.x).speed(0.1).prefix("X: ")).changed();
+                                    transform_changed |= ui.add(egui::DragValue::new(&mut transform.position.y).speed(0.1).prefix("Y: ")).changed();
+                                    transform_changed |= ui.add(egui::DragValue::new(&mut transform.position.z).speed(0.1).prefix("Z: ")).changed();
                                 });
 
                                 let (rx, ry, rz) = transform.rotation.to_euler(glam::EulerRot::XYZ);
@@ -445,19 +622,47 @@ pub fn draw_editor_ui(
                                         deg_y.to_radians(),
                                         deg_z.to_radians(),
                                     );
+                                    transform_changed = true;
                                 }
 
                                 ui.horizontal(|ui| {
-                                    ui.add(egui::DragValue::new(&mut transform.scale.x).speed(0.1).prefix("S_X: "));
-                                    ui.add(egui::DragValue::new(&mut transform.scale.y).speed(0.1).prefix("S_Y: "));
-                                    ui.add(egui::DragValue::new(&mut transform.scale.z).speed(0.1).prefix("S_Z: "));
+                                    transform_changed |= ui.add(egui::DragValue::new(&mut transform.scale.x).speed(0.1).prefix("S_X: ")).changed();
+                                    transform_changed |= ui.add(egui::DragValue::new(&mut transform.scale.y).speed(0.1).prefix("S_Y: ")).changed();
+                                    transform_changed |= ui.add(egui::DragValue::new(&mut transform.scale.z).speed(0.1).prefix("S_Z: ")).changed();
                                 });
+                            });
+
+                            if transform_changed {
+                                world.update_transforms();
+                            }
+                        });
+                        ui.add_space(5.0);
+                    }
+
+                    // camera
+                    if has_camera {
+                        ui.group(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("📷 Camera Component").strong());
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.button("❌").on_hover_text("Remove Camera").clicked() {
+                                        world.remove_camera(entity_id);
+                                    }
+                                });
+                            });
+
+                            world.get_camera_mut(entity_id, |camera| {
+                                ui.checkbox(&mut camera.is_active, "Active");
+                                ui.add(egui::Slider::new(&mut camera.fovy, 10.0..=120.0).text("FOV"));
+                                ui.add(egui::Slider::new(&mut camera.znear, 0.01..=10.0).text("Z Near"));
+                                ui.add(egui::Slider::new(&mut camera.zfar, 10.0..=10000.0).text("Z Far"));
+                                ui.add(egui::DragValue::new(&mut camera.priority).prefix("Priority: "));
                             });
                         });
                         ui.add_space(5.0);
                     }
 
-                    // 2. LIGHT COMPONENT
+                    // light
                     if has_light {
                         ui.group(|ui| {
                             ui.horizontal(|ui| {
@@ -513,7 +718,7 @@ pub fn draw_editor_ui(
                         ui.add_space(5.0);
                     }
 
-                    // 3. MESH COMPONENT
+                    // mesh
                     if has_model {
                         ui.group(|ui| {
                             ui.horizontal(|ui| {
@@ -533,12 +738,39 @@ pub fn draw_editor_ui(
                         ui.add_space(5.0);
                     }
 
-                    // ➕ ADD COMPONENT MENU
+                    // game components
+                    let dynamic_entries = world.get_component_entries();
+                    for entry in &dynamic_entries {
+                        if (entry.has)(world, entity_id) {
+                            ui.group(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(egui::RichText::new(format!("🧩 {}", entry.name)).strong());
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        if ui.button("❌").on_hover_text(format!("Remove {}", entry.name)).clicked() {
+                                            (entry.remove)(world, entity_id);
+                                        }
+                                    });
+                                });
+
+                                let mut visitor = EguiFieldVisitor { ui, changed: false };
+                                (entry.inspect)(world, entity_id, &mut visitor);
+                            });
+                            ui.add_space(5.0);
+                        }
+                    }
+
+                    // add component
                     ui.separator();
                     ui.menu_button("➕ Add Component", |ui| {
                         if !has_transform {
                             if ui.button("📍 Transform").clicked() {
                                 world.add_transform(entity_id, Transform::default());
+                                ui.close();
+                            }
+                        }
+                        if !has_camera {
+                            if ui.button("📷 Camera").clicked() {
+                                world.add_camera(entity_id, CameraComponent::default());
                                 ui.close();
                             }
                         }
@@ -555,6 +787,24 @@ pub fn draw_editor_ui(
                                 ui.close();
                             }
                         }
+
+                        let mut categories: std::collections::BTreeMap<&'static str, Vec<ecs::DynamicComponentEntry>> = std::collections::BTreeMap::new();
+                        for entry in &dynamic_entries {
+                            if !(entry.has)(world, entity_id) {
+                                categories.entry(entry.category).or_default().push(entry.clone());
+                            }
+                        }
+
+                        for (cat_name, entries_in_cat) in categories {
+                            ui.separator();
+                            ui.label(egui::RichText::new(format!("📁 {}", cat_name)).weak());
+                            for entry in entries_in_cat {
+                                if ui.button(format!("  ➕ {}", entry.name)).clicked() {
+                                    (entry.add_default)(world, entity_id);
+                                    ui.close();
+                                }
+                            }
+                        }
                     });
 
                     ui.add_space(15.0);
@@ -568,6 +818,7 @@ pub fn draw_editor_ui(
             }
         });
 
+    // Performance & Camera Window
     egui::Window::new("Performance & Camera")
         .default_pos([600.0, 10.0])
         .default_size([250.0, 300.0])
@@ -596,6 +847,7 @@ pub fn draw_editor_ui(
             ui.add(egui::Slider::new(&mut camera.fovy, 10.0..=120.0).text("FOV"));
         });
 
+    // Asset Browser Window
     egui::Window::new("Asset Browser")
         .default_pos([10.0, 600.0])
         .default_size([300.0, 200.0])

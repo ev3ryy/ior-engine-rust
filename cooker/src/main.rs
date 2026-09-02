@@ -92,17 +92,73 @@ fn cook_single_texture(
             let raw_pixels = &img_data.pixels;
 
             let img: RgbaImage = match img_data.format {
+                // 8-bit RGBA
+                gltf::image::Format::R8G8B8A8 => {
+                    ImageBuffer::from_raw(img_data.width, img_data.height, raw_pixels.clone())
+                        .context("Failed to create RgbaImage from RGBA8")?
+                }
+                // 8-bit RGB -> RGBA
                 gltf::image::Format::R8G8B8 => {
                     let mut rgba = Vec::with_capacity((img_data.width * img_data.height * 4) as usize);
                     for chunk in raw_pixels.chunks_exact(3) {
                         rgba.extend_from_slice(&[chunk[0], chunk[1], chunk[2], 255]);
                     }
                     ImageBuffer::from_raw(img_data.width, img_data.height, rgba)
-                        .context("Failed to create RgbaImage from RGB")?
+                        .context("Failed to create RgbaImage from RGB8")?
                 }
-                gltf::image::Format::R8G8B8A8 => {
-                    ImageBuffer::from_raw(img_data.width, img_data.height, raw_pixels.clone())
-                        .context("Failed to create RgbaImage from RGBA")?
+                // 16-bit RGBA -> 8-bit RGBA
+                gltf::image::Format::R16G16B16A16 => {
+                    let mut rgba = Vec::with_capacity((img_data.width * img_data.height * 4) as usize);
+                    for chunk in raw_pixels.chunks_exact(8) {
+                        let r = u16::from_ne_bytes([chunk[0], chunk[1]]);
+                        let g = u16::from_ne_bytes([chunk[2], chunk[3]]);
+                        let b = u16::from_ne_bytes([chunk[4], chunk[5]]);
+                        let a = u16::from_ne_bytes([chunk[6], chunk[7]]);
+                        rgba.extend_from_slice(&[
+                            (r >> 8) as u8,
+                            (g >> 8) as u8,
+                            (b >> 8) as u8,
+                            (a >> 8) as u8,
+                        ]);
+                    }
+                    ImageBuffer::from_raw(img_data.width, img_data.height, rgba)
+                        .context("Failed to create RgbaImage from RGBA16")?
+                }
+                // 16-bit RGB -> 8-bit RGBA
+                gltf::image::Format::R16G16B16 => {
+                    let mut rgba = Vec::with_capacity((img_data.width * img_data.height * 4) as usize);
+                    for chunk in raw_pixels.chunks_exact(6) {
+                        let r = u16::from_ne_bytes([chunk[0], chunk[1]]);
+                        let g = u16::from_ne_bytes([chunk[2], chunk[3]]);
+                        let b = u16::from_ne_bytes([chunk[4], chunk[5]]);
+                        rgba.extend_from_slice(&[
+                            (r >> 8) as u8,
+                            (g >> 8) as u8,
+                            (b >> 8) as u8,
+                            255,
+                        ]);
+                    }
+                    ImageBuffer::from_raw(img_data.width, img_data.height, rgba)
+                        .context("Failed to create RgbaImage from RGB16")?
+                }
+                // 8-bit (Grayscale/Alpha/Roughness)
+                gltf::image::Format::R8 => {
+                    let mut rgba = Vec::with_capacity((img_data.width * img_data.height * 4) as usize);
+                    for &val in raw_pixels {
+                        rgba.extend_from_slice(&[val, val, val, 255]);
+                    }
+                    ImageBuffer::from_raw(img_data.width, img_data.height, rgba)
+                        .context("Failed to create RgbaImage from R8")?
+                }
+                // 16-bit
+                gltf::image::Format::R16 => {
+                    let mut rgba = Vec::with_capacity((img_data.width * img_data.height * 4) as usize);
+                    for chunk in raw_pixels.chunks_exact(2) {
+                        let val = (u16::from_ne_bytes([chunk[0], chunk[1]]) >> 8) as u8;
+                        rgba.extend_from_slice(&[val, val, val, 255]);
+                    }
+                    ImageBuffer::from_raw(img_data.width, img_data.height, rgba)
+                        .context("Failed to create RgbaImage from R16")?
                 }
                 _ => anyhow::bail!("Unsupported glTF image format: {:?}", img_data.format),
             };
@@ -359,7 +415,6 @@ fn main() -> Result<()> {
             .unwrap_or_default();
 
         let mut light_idx = None;
-        // crate cooker -> main.rs
 
         if let Some(light) = node.light() {
             let idx = light.index();

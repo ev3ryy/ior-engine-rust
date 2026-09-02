@@ -262,7 +262,7 @@ impl<T: Send + Sync + 'static> AssetStore<T> {
 trait AnyStore: Send + Sync {
     fn as_any(&self) -> &dyn Any;
     fn remove(&self, id: AssetId) -> bool;
-    fn type_id(&self) -> TypeId;
+    //fn type_id(&self) -> TypeId;
 }
 
 struct StoreContainer<T: Send + Sync + 'static> {
@@ -278,9 +278,9 @@ impl<T: Send + Sync + 'static> AnyStore for StoreContainer<T> {
         self.store.unload(id)
     }
 
-    fn type_id(&self) -> TypeId {
-        TypeId::of::<T>()
-    }
+    // fn type_id(&self) -> TypeId {
+    //     TypeId::of::<T>()
+    // }
 }
 
 pub struct AssetServer {

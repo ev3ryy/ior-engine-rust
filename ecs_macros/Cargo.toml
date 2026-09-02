@@ -1,0 +1,13 @@
+[package]
+name = "ecs_macros"
+version = "0.1.0"
+authors = ["iLLusion of Reality"]
+edition = "2024"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "3.0.4", features = ["full", "extra-traits"] }
+quote = "1.0"
+proc-macro2 = "1.0"

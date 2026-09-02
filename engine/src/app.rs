@@ -23,4 +23,6 @@ pub trait Application {
 
     #[allow(unused_variables)]
     fn on_ui(&mut self, ctx: &egui::Context, world: &mut World, camera: &mut Camera, postprocess: &mut render::postprocess::PostProcessSettings, metrics: &EngineMetrics, load_requests: &mut Vec<String>) {}
+
+    fn is_in_play_mode(&self) -> bool { false }
 }

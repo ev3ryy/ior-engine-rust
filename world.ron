@@ -1,0 +1,1619 @@
+WorldSnapshot(
+    version: 1,
+    entities: [
+        EntityRecord(
+            name: "Sponza",
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "Node",
+            parent_index: Some(0),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (0.008, 0.008, 0.008),
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_0",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 0,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_1",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 1,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_2",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 2,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_3",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 3,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_4",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 4,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_5",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 5,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_6",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 6,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_7",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 7,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_8",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 8,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_9",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 9,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_10",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 10,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_11",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 11,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_12",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 12,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_13",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 13,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_14",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 14,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_15",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 15,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_16",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 16,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_17",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 17,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_18",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 18,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_19",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 19,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_20",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 20,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_21",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 21,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_22",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 22,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_23",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 23,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_24",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 24,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_25",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 25,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_26",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 26,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_27",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 27,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_28",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 28,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_29",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 29,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_30",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 30,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_31",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 31,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_32",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 32,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_33",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 33,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_34",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 34,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_35",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 35,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_36",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 36,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_37",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 37,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_38",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 38,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_39",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 39,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_40",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 40,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_41",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 41,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_42",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 42,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_43",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 43,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_44",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 44,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_45",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 45,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_46",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 46,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_47",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 47,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_48",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 48,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_49",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 49,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_50",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 50,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_51",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 51,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_52",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 52,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_53",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 53,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_54",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 54,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_55",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 55,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_56",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 56,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_57",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 57,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_58",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 58,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_59",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 59,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_60",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 60,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_61",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 61,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_62",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 62,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_63",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 63,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_64",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 64,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_65",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 65,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_66",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 66,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_67",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 67,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_68",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 68,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_69",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 69,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_70",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 70,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_71",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 71,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_72",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 72,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_73",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 73,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_74",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 74,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_75",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 75,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_76",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 76,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_77",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 77,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_78",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 78,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_79",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 79,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_80",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 80,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_81",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 81,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_82",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 82,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_83",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 83,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_84",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 84,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_85",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 85,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_86",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 86,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_87",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 87,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_88",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 88,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_89",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 89,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_90",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 90,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_91",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 91,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_92",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 92,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_93",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 93,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_94",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 94,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_95",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 95,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_96",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 96,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_97",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 97,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_98",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 98,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_99",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 99,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_100",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 100,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_101",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 101,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "UnnamedMesh_102",
+            parent_index: Some(1),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "Sponza.bin",
+                mesh_index: 102,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "Directional Light",
+            transform: Some(SavedTransform(
+                position: (0.0, 10.0, 0.0),
+                rotation: (-0.6620275, -0.14698943, 0.13469104, 0.7224763),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            light: Some(LightComponent(
+                light_type: Directional,
+                color: (1.0, 0.95, 0.8),
+                intensity: 5.0,
+                range: 100.0,
+                inner_angle: 0.0,
+                outer_angle: 0.0,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "food_lime_01",
+            parent_index: Some(107),
+            transform: Some(SavedTransform(
+                position: (0.0, 0.0, 0.0),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (1.0, 1.0, 1.0),
+            )),
+            model: Some(SavedModel(
+                path: "food_lime_01_4k.bin",
+                mesh_index: 0,
+            )),
+            is_static: true,
+            is_dynamic: false,
+        ),
+        EntityRecord(
+            name: "food_lime_01_4k",
+            transform: Some(SavedTransform(
+                position: (0.0, 1.8081049, -0.27763662),
+                rotation: (0.0, 0.0, 0.0, 1.0),
+                scale: (5.0, 5.0, 5.0),
+            )),
+            components: {
+                "Rotator": {
+                    "speed": 0.1,
+                },
+            },
+            is_static: true,
+            is_dynamic: true,
+        ),
+    ],
+)

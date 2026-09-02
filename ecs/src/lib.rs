@@ -1,25 +1,120 @@
 pub mod components;
+pub mod reflection;
 pub mod serialization;
 
 pub use components::*;
+pub use reflection::*;
+pub use inventory;
+
+pub use flecs_ecs::{self, prelude::*};
+pub use flecs_ecs_derive::Component;
+pub use ecs_macros::Inspectable;
 
 use asset::AssetId;
-use flecs_ecs::prelude::*;
 use glam::{Mat4, Quat, Vec3};
 use shared::BakedModel;
+use std::ops::{Deref, DerefMut};
+use std::sync::{Arc, RwLock};
 
 pub struct World {
     pub inner: flecs_ecs::core::World,
+    pub component_entries: Arc<RwLock<Vec<DynamicComponentEntry>>>,
+}
+
+impl Deref for World {
+    type Target = flecs_ecs::core::World;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl DerefMut for World {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
 }
 
 impl World {
+    // --- Dynamic Component Reflection & Registration ---
+
+    pub fn register_component<T>(&self)
+    where
+        T: Inspectable + Default + Clone + ComponentId + DataComponent,
+    {
+        self.register_component_internal::<T>(T::NAME, T::CATEGORY);
+    }
+
+    pub fn register_component_internal<T>(&self, name: &'static str, category: &'static str)
+    where
+        T: Inspectable + Default + Clone + ComponentId + DataComponent,
+    {
+        self.inner.component::<T>();
+
+        let mut entries = self.component_entries.write().unwrap();
+        if entries.iter().any(|e| e.name == name) {
+            return;
+        }
+
+        entries.push(DynamicComponentEntry {
+            name,
+            category,
+            add_default: Arc::new(|world, id| {
+                let entity = world.inner.entity_from_id(id);
+                if entity.is_alive() {
+                    entity.set(T::default());
+                }
+            }),
+            has: Arc::new(|world, id| {
+                let entity = world.inner.entity_from_id(id);
+                entity.is_alive() && entity.has(T::id())
+            }),
+            remove: Arc::new(|world, id| {
+                let entity = world.inner.entity_from_id(id);
+                if entity.is_alive() && entity.has(T::id()) {
+                    entity.remove(T::id());
+                }
+            }),
+            inspect: Arc::new(|world, id, visitor| {
+                let entity = world.inner.entity_from_id(id);
+                if entity.is_alive() && entity.has(T::id()) {
+                    entity.try_get::<&mut T>(|comp| {
+                        comp.inspect_fields(visitor);
+                    });
+                }
+            }),
+        });
+    }
+
+    pub fn auto_register_components(&self) {
+        for entry in inventory::iter::<ComponentRegistryEntry> {
+            (entry.register_fn)(self);
+        }
+    }
+
+    pub fn get_component_entries(&self) -> Vec<DynamicComponentEntry> {
+        self.component_entries.read().unwrap().clone()
+    }
+
+    // --- Snapshots & Execution ---
+    pub fn create_snapshot(&self) -> anyhow::Result<Vec<u8>> {
+        serialization::create_world_snapshot(self)
+    }
+
+    pub fn restore_snapshot(&mut self, bytes: &[u8]) -> anyhow::Result<()> {
+        serialization::restore_world_snapshot(self, bytes)
+    }
+
+    pub fn progress(&self) {
+        self.inner.progress();
+    }
+
     // --- Scene Lifecycle ---
 
     pub fn clear_scene(&mut self) {
         let mut root_entities = Vec::new();
 
-        // Прямой проход без аллокаций query!
-        self.inner.each_entity::<&Transform>(|entity, _| {
+        self.inner.each_entity::<&EntityName>(|entity, _| {
             if entity.has(SceneEntity::id()) && entity.parent().is_none() {
                 root_entities.push(*entity.id());
             }
@@ -34,7 +129,11 @@ impl World {
     }
 
     pub fn spawn_empty(&self, name: &str) -> u64 {
-        let entity = self.inner.entity().set_name(name).add(SceneEntity);
+        let entity = self
+            .inner
+            .entity()
+            .set(EntityName(name.to_string()))
+            .add(SceneEntity);
         *entity.id()
     }
 
@@ -43,8 +142,8 @@ impl World {
         let entity = self
             .inner
             .entity()
-            .set_name(name)
             .child_of(parent)
+            .set(EntityName(name.to_string()))
             .add(SceneEntity);
         *entity.id()
     }
@@ -64,23 +163,27 @@ impl World {
 
     pub fn get_entity_name(&self, entity_id: u64) -> String {
         let entity = self.inner.entity_from_id(entity_id);
-        if entity.is_alive() {
-            entity.get_name().unwrap_or_default()
-        } else {
-            String::new()
+        if !entity.is_alive() {
+            return String::new();
         }
+
+        if let Some(name) = entity.try_get::<&EntityName>(|n| n.0.clone()) {
+            return name;
+        }
+
+        entity.get_name().unwrap_or_default()
     }
 
     pub fn set_entity_name(&self, entity_id: u64, name: &str) {
         let entity = self.inner.entity_from_id(entity_id);
         if entity.is_alive() {
-            entity.set_name(name);
+            entity.set(EntityName(name.to_string()));
         }
     }
 
     pub fn get_root_entities(&self) -> Vec<u64> {
         let mut roots = Vec::new();
-        self.inner.each_entity::<&Transform>(|entity, _| {
+        self.inner.each_entity::<&EntityName>(|entity, _| {
             if entity.has(SceneEntity::id()) && entity.parent().is_none() {
                 roots.push(*entity.id());
             }
@@ -93,7 +196,9 @@ impl World {
         let entity = self.inner.entity_from_id(entity_id);
         if entity.is_alive() {
             entity.each_child(|child| {
-                children.push(*child.id());
+                if child.has(SceneEntity::id()) {
+                    children.push(*child.id());
+                }
             });
         }
         children
@@ -118,13 +223,11 @@ impl World {
     pub fn add_transform(&self, entity_id: u64, transform: Transform) {
         let entity = self.inner.entity_from_id(entity_id);
         if entity.is_alive() {
-            let parent_global = if let Some(parent) = entity.parent() {
-                let mut p = Mat4::IDENTITY;
-                parent.try_get::<&GlobalTransform>(|g| p = g.0);
-                p
-            } else {
-                Mat4::IDENTITY
-            };
+            let parent_global = entity
+                .parent()
+                .and_then(|parent| parent.try_get::<&GlobalTransform>(|g| g.0))
+                .unwrap_or(Mat4::IDENTITY);
+
             let global_mat = parent_global * transform.compute_matrix();
 
             entity
@@ -155,9 +258,7 @@ impl World {
     pub fn get_global_transform(&self, entity_id: u64) -> Option<Mat4> {
         let entity = self.inner.entity_from_id(entity_id);
         if entity.is_alive() {
-            let mut mat = None;
-            entity.try_get::<&GlobalTransform>(|g| mat = Some(g.0));
-            mat
+            entity.try_get::<&GlobalTransform>(|g| g.0)
         } else {
             None
         }
@@ -169,13 +270,10 @@ impl World {
             return;
         }
 
-        let parent_global = if let Some(parent) = entity.parent() {
-            let mut p_mat = Mat4::IDENTITY;
-            parent.try_get::<&GlobalTransform>(|g| p_mat = g.0);
-            p_mat
-        } else {
-            Mat4::IDENTITY
-        };
+        let parent_global = entity
+            .parent()
+            .and_then(|parent| parent.try_get::<&GlobalTransform>(|g| g.0))
+            .unwrap_or(Mat4::IDENTITY);
 
         let local_matrix = parent_global.inverse() * new_global;
         let (scale, rotation, position) = local_matrix.to_scale_rotation_translation();
@@ -189,33 +287,37 @@ impl World {
         entity.add(Dynamic);
     }
 
-    // БЫСТРОЕ ОБНОВЛЕНИЕ БЕЗ АЛЛОКАЦИЙ
     pub fn update_transforms(&self) {
-        fn propagate_dynamic(entity: flecs_ecs::core::EntityView, parent_global: Mat4) {
+        fn propagate(entity: flecs_ecs::core::EntityView, parent_global: Mat4) {
             let mut current_global = parent_global;
 
-            entity.try_get::<&Transform>(|transform| {
-                current_global = parent_global * transform.compute_matrix();
+            if let Some(global) = entity.try_get::<&Transform>(|transform| {
+                parent_global * transform.compute_matrix()
+            }) {
+                current_global = global;
                 entity.set(GlobalTransform(current_global));
-            });
+            }
 
             entity.each_child(|child| {
-                propagate_dynamic(child, current_global);
+                propagate(child, current_global);
             });
         }
 
-        self.inner
-            .each_entity::<&Transform>(|entity, transform| {
-                // Обновляем только если сущность динамическая и в корне
-                if entity.has(Dynamic::id()) && entity.parent().is_none() {
-                    let root_matrix = transform.compute_matrix();
+        self.inner.each_entity::<&EntityName>(|entity, _| {
+            if entity.has(SceneEntity::id()) && entity.parent().is_none() {
+                let mut root_matrix = Mat4::IDENTITY;
+                if let Some(mat) = entity.try_get::<&Transform>(|transform| {
+                    transform.compute_matrix()
+                }) {
+                    root_matrix = mat;
                     entity.set(GlobalTransform(root_matrix));
-
-                    entity.each_child(|child| {
-                        propagate_dynamic(child, root_matrix);
-                    });
                 }
-            });
+
+                entity.each_child(|child| {
+                    propagate(child, root_matrix);
+                });
+            }
+        });
     }
 
     // --- Light Component Management ---
@@ -276,6 +378,55 @@ impl World {
         }
     }
 
+    // --- Camera Component Management ---
+
+    pub fn has_camera(&self, entity_id: u64) -> bool {
+        let entity = self.inner.entity_from_id(entity_id);
+        entity.is_alive() && entity.has(CameraComponent::id())
+    }
+
+    pub fn add_camera(&self, entity_id: u64, camera: CameraComponent) {
+        let entity = self.inner.entity_from_id(entity_id);
+        if entity.is_alive() {
+            if !self.has_transform(entity_id) {
+                self.add_transform(entity_id, Transform::default());
+            }
+            entity.set(camera);
+        }
+    }
+
+    pub fn remove_camera(&self, entity_id: u64) {
+        let entity = self.inner.entity_from_id(entity_id);
+        if entity.is_alive() {
+            entity.remove(CameraComponent::id());
+        }
+    }
+
+    pub fn get_camera_mut<F>(&self, entity_id: u64, mut f: F)
+    where
+        F: FnMut(&mut CameraComponent),
+    {
+        let entity = self.inner.entity_from_id(entity_id);
+        if entity.is_alive() {
+            entity.try_get::<&mut CameraComponent>(|c| f(c));
+        }
+    }
+
+    pub fn get_active_game_camera(&self) -> Option<(Vec3, Quat, CameraComponent)> {
+        let mut best_camera = None;
+        let mut highest_priority = i32::MIN;
+
+        self.inner.each::<(&GlobalTransform, &CameraComponent)>(|(global, camera)| {
+            if camera.is_active && camera.priority >= highest_priority {
+                highest_priority = camera.priority;
+                let (_, rot, pos) = global.0.to_scale_rotation_translation();
+                best_camera = Some((pos, rot, *camera));
+            }
+        });
+
+        best_camera
+    }
+
     // --- Render Queries ---
 
     pub fn each_model<F>(&self, mut f: F)
@@ -301,15 +452,23 @@ impl World {
 pub fn create_world() -> World {
     let world = flecs_ecs::core::World::new();
 
+    world.component::<EntityName>();
     world.component::<Transform>();
     world.component::<GlobalTransform>();
+    world.component::<CameraComponent>();
     world.component::<LightComponent>();
     world.component::<ModelComponent>();
     world.component::<Static>();
     world.component::<Dynamic>();
     world.component::<SceneEntity>();
 
-    World { inner: world }
+    let w = World {
+        inner: world,
+        component_entries: Arc::new(RwLock::new(Vec::new())),
+    };
+
+    w.auto_register_components();
+    w
 }
 
 pub fn spawn_scene(
@@ -330,7 +489,7 @@ pub fn spawn_scene(
     let model_root = world
         .inner
         .entity()
-        .set_name(clean_name)
+        .set(EntityName(clean_name.to_string()))
         .set(root_transform)
         .set(GlobalTransform(root_matrix))
         .add(SceneEntity)
@@ -363,8 +522,8 @@ pub fn spawn_scene(
         let node_entity = world
             .inner
             .entity()
-            .set_name(&node_name)
             .child_of(parent)
+            .set(EntityName(node_name.clone()))
             .set(local_transform)
             .set(GlobalTransform(global_matrix))
             .add(SceneEntity)
@@ -387,8 +546,8 @@ pub fn spawn_scene(
                 world
                     .inner
                     .entity()
-                    .set_name(&child_mesh_name)
                     .child_of(node_entity)
+                    .set(EntityName(child_mesh_name))
                     .set(Transform::default())
                     .set(GlobalTransform(global_matrix))
                     .set(ModelComponent {
@@ -423,8 +582,8 @@ pub fn spawn_scene(
             world
                 .inner
                 .entity()
-                .set_name(&light_name)
                 .child_of(node_entity)
+                .set(EntityName(light_name))
                 .set(Transform::default())
                 .set(GlobalTransform(global_matrix))
                 .set(light_component)

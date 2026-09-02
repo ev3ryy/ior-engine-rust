@@ -10,17 +10,18 @@ struct ShaderTarget {
 }
 
 fn main() {
-    // Отслеживаем изменения в папке шейдеров
     println!("cargo:rerun-if-changed=shaders");
 
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR environment variable is not set");
     let out_path = PathBuf::from(out_dir);
 
-    let slangc_path = match env::var("SLANG_DIR") {
-        Ok(dir) => Path::new(&dir).join("bin").join("slangc"),
-        Err(_) => PathBuf::from("slangc"),
-    };
+    let exe_name = if cfg!(target_os = "windows") { "slangc.exe" } else { "slangc" };
 
+    let slangc_path = match env::var("SLANG_DIR") {
+        Ok(dir) => Path::new(&dir).join("bin").join(exe_name),
+        Err(_) => PathBuf::from(exe_name),
+    };
+    
     let shaders = [
         ShaderTarget { src: "shaders/main.slang", entry: "vs_main", stage: "vertex", dst: "main_vs.wgsl" },
         ShaderTarget { src: "shaders/main.slang", entry: "fs_main", stage: "fragment", dst: "main_fs.wgsl" },

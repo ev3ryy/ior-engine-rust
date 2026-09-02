@@ -43,7 +43,6 @@ pub struct LightClusterSystem {
     pub previous_shadow_points: HashSet<u32>,
     pub previous_shadow_spots: HashSet<u32>,
 
-    // Scratch buffers для устранения аллокаций при скоринге
     scored_points_scratch: Vec<(usize, f32)>,
     scored_spots_scratch: Vec<(usize, f32)>,
 }

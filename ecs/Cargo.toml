@@ -7,9 +7,15 @@ edition = "2024"
 [dependencies]
 asset = {path = "../asset"}
 shared = {path = "../shared"}
+ecs_macros = { path = "../ecs_macros" }
+inventory = "0.3"
 flecs_ecs = "0.2.2"
+flecs_ecs_derive = "0.2"
 parcode = "0.6.1"
 memmap2 = "0.9.11"
 anyhow = "1.0.104"
 glam = "0.33.2"
+log = "0.4"
+ron = "0.12.2"
 rkyv = {version = "0.8.17"}
+serde = { version = "1.0", features = ["derive"] }
