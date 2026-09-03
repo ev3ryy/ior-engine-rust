@@ -1,7 +1,11 @@
+use crate::physics::PhysicsWorld;
 use ecs::World;
 use std::collections::HashSet;
-use winit::event::MouseButton;
-use winit::keyboard::KeyCode;
+
+pub use winit::event::MouseButton;
+pub use winit::keyboard::KeyCode;
+
+pub use crate::physics::{RayHit, RaycastFilter};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayState {
@@ -33,12 +37,64 @@ pub struct GameInput {
 }
 
 impl GameInput {
+    #[inline]
     pub fn is_key_down(&self, code: KeyCode) -> bool {
         self.keys_pressed.contains(&code)
     }
 
+    #[inline]
     pub fn is_key_just_pressed(&self, code: KeyCode) -> bool {
         self.keys_just_pressed.contains(&code)
+    }
+
+    #[inline]
+    pub fn is_mouse_down(&self, button: MouseButton) -> bool {
+        self.mouse_pressed.contains(&button)
+    }
+
+    #[inline]
+    pub fn is_mouse_just_pressed(&self, button: MouseButton) -> bool {
+        self.mouse_just_pressed.contains(&button)
+    }
+    
+    #[inline]
+    pub fn is_jump(&self) -> bool {
+        self.is_key_just_pressed(KeyCode::Space)
+    }
+
+    #[inline]
+    pub fn is_sprint(&self) -> bool {
+        self.is_key_down(KeyCode::ShiftLeft) || self.is_key_down(KeyCode::ShiftRight)
+    }
+
+    #[inline]
+    pub fn is_crouch(&self) -> bool {
+        self.is_key_down(KeyCode::ControlLeft) || self.is_key_down(KeyCode::KeyC)
+    }
+
+    #[inline]
+    pub fn is_shoot(&self) -> bool {
+        self.is_mouse_down(MouseButton::Left)
+    }
+
+    #[inline]
+    pub fn is_shoot_just_pressed(&self) -> bool {
+        self.is_mouse_just_pressed(MouseButton::Left)
+    }
+
+    #[inline]
+    pub fn is_aim(&self) -> bool {
+        self.is_mouse_down(MouseButton::Right)
+    }
+
+    #[inline]
+    pub fn is_reload(&self) -> bool {
+        self.is_key_just_pressed(KeyCode::KeyR)
+    }
+
+    #[inline]
+    pub fn is_interact(&self) -> bool {
+        self.is_key_just_pressed(KeyCode::KeyE)
     }
 
     pub fn clear_frame_deltas(&mut self) {
@@ -50,16 +106,65 @@ impl GameInput {
 
 pub trait GamePlugin: Send + Sync + 'static {
     fn init(&mut self, world: &World);
-    fn on_start(&mut self, world: &World);
+
+    #[allow(unused_variables)]
+    fn on_start(&mut self, world: &World, physics: &mut PhysicsWorld) {}
+
     fn on_stop(&mut self, world: &World);
-    fn on_update(&mut self, world: &World, input: &GameInput, dt: f32);
+
+    #[allow(unused_variables)]
+    fn on_fixed_update(
+        &mut self,
+        world: &World,
+        physics: &mut PhysicsWorld,
+        input: &GameInput,
+        fixed_dt: f32,
+    ) {}
+
+    #[allow(unused_variables)]
+    fn on_update(
+        &mut self,
+        world: &World,
+        physics: &mut PhysicsWorld,
+        input: &GameInput,
+        dt: f32,
+    ) {}
+
+    #[allow(unused_variables)]
+    fn on_late_update(
+        &mut self,
+        world: &World,
+        physics: &mut PhysicsWorld,
+        input: &GameInput,
+        dt: f32,
+    ) {}
 }
 
 pub struct DefaultGamePlugin;
 
 impl GamePlugin for DefaultGamePlugin {
     fn init(&mut self, _world: &World) {}
-    fn on_start(&mut self, _world: &World) {}
+    fn on_start(&mut self, _world: &World, _physics: &mut PhysicsWorld) {}
     fn on_stop(&mut self, _world: &World) {}
-    fn on_update(&mut self, _world: &World, _input: &GameInput, _dt: f32) {}
+    fn on_fixed_update(
+        &mut self,
+        _world: &World,
+        _physics: &mut PhysicsWorld,
+        _input: &GameInput,
+        _fixed_dt: f32,
+    ) {}
+    fn on_update(
+        &mut self,
+        _world: &World,
+        _physics: &mut PhysicsWorld,
+        _input: &GameInput,
+        _dt: f32,
+    ) {}
+    fn on_late_update(
+        &mut self,
+        _world: &World,
+        _physics: &mut PhysicsWorld,
+        _input: &GameInput,
+        _dt: f32,
+    ) {}
 }

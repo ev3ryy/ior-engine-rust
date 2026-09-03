@@ -57,6 +57,9 @@ pub struct EngineRunner<A: Application> {
     pub last_cursor_pos: Option<(f64, f64)>,
     pub world_snapshot: Option<Vec<u8>>,
 
+    pub physics_accumulator: f32,
+    pub fixed_timestep: f32,
+
     pub camera: Camera,
     pub camera_controller: CameraController,
     pub light_uniforms_cache: Vec<LightUniform>,
@@ -80,9 +83,10 @@ impl<A: Application> EngineRunner<A> {
             }
             self.play_state = PlayState::Playing;
 
+            self.physics_accumulator = 0.0;
             self.physics.clear();
             self.physics.sync_from_ecs(&self.world);
-            self.game_plugin.on_start(&self.world);
+            self.game_plugin.on_start(&self.world, &mut self.physics);
             log::info!("[ENGINE] Game started (Play Mode). Snapshot saved.");
         }
     }
@@ -94,9 +98,10 @@ impl<A: Application> EngineRunner<A> {
             }
             self.play_state = PlayState::Simulating;
 
+            self.physics_accumulator = 0.0;
             self.physics.clear();
             self.physics.sync_from_ecs(&self.world);
-            self.game_plugin.on_start(&self.world);
+            self.game_plugin.on_start(&self.world, &mut self.physics);
             log::info!("[ENGINE] Simulation started (Simulate Mode). Snapshot saved.");
         }
     }
@@ -105,6 +110,7 @@ impl<A: Application> EngineRunner<A> {
         if self.play_state != PlayState::Editing {
             self.game_plugin.on_stop(&self.world);
             self.physics.clear();
+            self.physics_accumulator = 0.0;
 
             if let Some(bytes) = &self.world_snapshot {
                 if let Err(e) = self.world.restore_snapshot(bytes) {
@@ -132,6 +138,7 @@ impl<A: Application> EngineRunner<A> {
                 } else {
                     PlayState::Playing
                 };
+                self.physics_accumulator = 0.0;
                 log::info!("[ENGINE] Resumed.");
             }
             PlayState::Editing => {}
@@ -421,37 +428,112 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
 
                 match self.play_state {
                     PlayState::Playing => {
-                        self.physics.sync_from_ecs(&self.world);
-                        self.physics.step(dt);
-                        self.physics.sync_to_ecs(&self.world);
+                        let frame_clamped = dt.min(0.25);
+                        self.physics_accumulator += frame_clamped;
 
-                        self.game_plugin.on_update(&self.world, &self.game_input, dt);
+                        while self.physics_accumulator >= self.fixed_timestep {
+                            self.physics.sync_from_ecs(&self.world);
+                            self.physics.step(self.fixed_timestep);
+                            self.physics.sync_to_ecs(&self.world);
+
+                            self.game_plugin.on_fixed_update(
+                                &self.world,
+                                &mut self.physics,
+                                &self.game_input,
+                                self.fixed_timestep,
+                            );
+
+                            self.physics_accumulator -= self.fixed_timestep;
+                        }
+
+                        self.game_plugin.on_update(
+                            &self.world,
+                            &mut self.physics,
+                            &self.game_input,
+                            dt,
+                        );
                         self.world.progress();
+
+                        self.game_plugin.on_late_update(
+                            &self.world,
+                            &mut self.physics,
+                            &self.game_input,
+                            dt,
+                        );
+
                         self.game_input.clear_frame_deltas();
                     }
                     PlayState::Simulating => {
-                        self.physics.sync_from_ecs(&self.world);
-                        self.physics.step(dt);
-                        self.physics.sync_to_ecs(&self.world);
+                        let frame_clamped = dt.min(0.25);
+                        self.physics_accumulator += frame_clamped;
 
                         let dummy_input = GameInput::default();
-                        self.game_plugin.on_update(&self.world, &dummy_input, dt);
+                        while self.physics_accumulator >= self.fixed_timestep {
+                            self.physics.sync_from_ecs(&self.world);
+                            self.physics.step(self.fixed_timestep);
+                            self.physics.sync_to_ecs(&self.world);
+
+                            self.game_plugin.on_fixed_update(
+                                &self.world,
+                                &mut self.physics,
+                                &dummy_input,
+                                self.fixed_timestep,
+                            );
+
+                            self.physics_accumulator -= self.fixed_timestep;
+                        }
+
+                        self.game_plugin.on_update(
+                            &self.world,
+                            &mut self.physics,
+                            &dummy_input,
+                            dt,
+                        );
                         self.world.progress();
+
+                        self.game_plugin.on_late_update(
+                            &self.world,
+                            &mut self.physics,
+                            &dummy_input,
+                            dt,
+                        );
+
                         self.game_input.clear_frame_deltas();
                     }
                     PlayState::Paused { ref mut step_frame, was_simulating } => {
                         if *step_frame {
-                            self.physics.sync_from_ecs(&self.world);
-                            self.physics.step(dt);
-                            self.physics.sync_to_ecs(&self.world);
-
                             let input = if was_simulating {
                                 GameInput::default()
                             } else {
                                 self.game_input.clone()
                             };
-                            self.game_plugin.on_update(&self.world, &input, dt);
+
+                            self.physics.sync_from_ecs(&self.world);
+                            self.physics.step(self.fixed_timestep);
+                            self.physics.sync_to_ecs(&self.world);
+
+                            self.game_plugin.on_fixed_update(
+                                &self.world,
+                                &mut self.physics,
+                                &input,
+                                self.fixed_timestep,
+                            );
+
+                            self.game_plugin.on_update(
+                                &self.world,
+                                &mut self.physics,
+                                &input,
+                                self.fixed_timestep,
+                            );
                             self.world.progress();
+
+                            self.game_plugin.on_late_update(
+                                &self.world,
+                                &mut self.physics,
+                                &input,
+                                self.fixed_timestep,
+                            );
+
                             self.game_input.clear_frame_deltas();
                             *step_frame = false;
                         }
@@ -729,6 +811,9 @@ pub fn run<A: Application>(
         game_input: GameInput::default(),
         last_cursor_pos: None,
         world_snapshot: None,
+
+        physics_accumulator: 0.0,
+        fixed_timestep: 1.0 / 60.0,
 
         camera,
         camera_controller,

@@ -10,6 +10,28 @@ pub use flecs_ecs::{self, prelude::*};
 pub use flecs_ecs_derive::Component;
 pub use ecs_macros::Inspectable;
 
+pub trait EntityExt {
+    fn raw_id(&self) -> u64;
+}
+
+impl<'a> EntityExt for flecs_ecs::core::EntityView<'a> {
+    #[inline]
+    fn raw_id(&self) -> u64 {
+        *self.id()
+    }
+}
+
+pub mod prelude {
+    pub use crate::flecs_ecs; 
+    pub use flecs_ecs::prelude::*;
+    pub use flecs_ecs_derive::Component;
+    pub use ecs_macros::Inspectable;
+    pub use crate::components::*;
+    pub use crate::reflection::*;
+    pub use crate::EntityExt;
+    pub use crate::{create_world, World};
+}
+
 use asset::AssetId;
 use glam::{Mat4, Quat, Vec3};
 use shared::BakedModel;

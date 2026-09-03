@@ -8,6 +8,31 @@ pub fn transform_to_pose(pos: glam::Vec3, rot: glam::Quat) -> Pose {
     Pose::from_parts(pos, rot)
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct RayHit {
+    pub entity: u64,
+    pub point: glam::Vec3,
+    pub normal: glam::Vec3,
+    pub distance: f32,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RaycastFilter {
+    pub exclude_entity: Option<u64>,
+    pub ignore_sensors: bool,
+    pub solid: bool,
+}
+
+impl Default for RaycastFilter {
+    fn default() -> Self {
+        Self {
+            exclude_entity: None,
+            ignore_sensors: true,
+            solid: true,
+        }
+    }
+}
+
 pub struct PhysicsWorld {
     pub gravity: Vector,
     pub integration_parameters: IntegrationParameters,
@@ -67,6 +92,130 @@ impl PhysicsWorld {
         self.body_to_entity.clear();
     }
 
+    // --- Spatial Queries (Raycasting) ---
+    pub fn cast_ray(
+        &self,
+        origin: glam::Vec3,
+        dir: glam::Vec3,
+        max_distance: f32,
+        filter: RaycastFilter,
+    ) -> Option<RayHit> {
+        if dir.length_squared() < 1e-6 {
+            return None;
+        }
+        let norm_dir = dir.normalize();
+        let ray = Ray::new(origin, norm_dir);
+
+        let mut query_filter = QueryFilter::default();
+        if filter.ignore_sensors {
+            query_filter = query_filter.exclude_sensors();
+        }
+
+        if let Some(exclude_id) = filter.exclude_entity {
+            if let Some(&rb_handle) = self.entity_to_body.get(&exclude_id) {
+                query_filter = query_filter.exclude_rigid_body(rb_handle);
+            }
+        }
+
+        let query_pipeline = self.broad_phase.as_query_pipeline(
+            self.narrow_phase.query_dispatcher(),
+            &self.rigid_body_set,
+            &self.collider_set,
+            query_filter,
+        );
+
+        if let Some((collider_handle, hit)) =
+            query_pipeline.cast_ray_and_get_normal(&ray, max_distance, filter.solid)
+        {
+            let hit_entity = self
+                .collider_set
+                .get(collider_handle)
+                .and_then(|c| {
+                    if c.user_data != 0 {
+                        Some(c.user_data as u64)
+                    } else if let Some(parent) = c.parent() {
+                        self.body_to_entity.get(&parent).copied()
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(0);
+
+            let hit_point = origin + norm_dir * hit.time_of_impact;
+
+            Some(RayHit {
+                entity: hit_entity,
+                point: hit_point,
+                normal: hit.normal,
+                distance: hit.time_of_impact,
+            })
+        } else {
+            None
+        }
+    }
+
+    pub fn cast_ray_simple(&self, origin: glam::Vec3, dir: glam::Vec3, max_dist: f32) -> Option<RayHit> {
+        self.cast_ray(origin, dir, max_dist, RaycastFilter::default())
+    }
+
+    pub fn is_on_ground(&self, entity_id: u64, current_pos: glam::Vec3, check_distance: f32) -> bool {
+        let filter = RaycastFilter {
+            exclude_entity: Some(entity_id),
+            ignore_sensors: true,
+            solid: false,
+        };
+        if let Some(hit) = self.cast_ray(current_pos, glam::Vec3::NEG_Y, check_distance, filter) {
+            hit.normal.y > 0.5
+        } else {
+            false
+        }
+    }
+
+    // --- Gameplay Manipulation Helpers ---
+    pub fn apply_impulse(&mut self, entity_id: u64, impulse: glam::Vec3) {
+        if let Some(&handle) = self.entity_to_body.get(&entity_id) {
+            if let Some(body) = self.rigid_body_set.get_mut(handle) {
+                body.apply_impulse(impulse, true);
+            }
+        }
+    }
+
+    pub fn apply_force(&mut self, entity_id: u64, force: glam::Vec3) {
+        if let Some(&handle) = self.entity_to_body.get(&entity_id) {
+            if let Some(body) = self.rigid_body_set.get_mut(handle) {
+                body.add_force(force, true);
+            }
+        }
+    }
+
+    pub fn set_linear_velocity(&mut self, entity_id: u64, velocity: glam::Vec3) {
+        if let Some(&handle) = self.entity_to_body.get(&entity_id) {
+            if let Some(body) = self.rigid_body_set.get_mut(handle) {
+                body.set_linvel(velocity, true);
+            }
+        }
+    }
+
+    pub fn get_linear_velocity(&self, entity_id: u64) -> glam::Vec3 {
+        self.entity_to_body
+            .get(&entity_id)
+            .and_then(|&h| self.rigid_body_set.get(h))
+            .map(|b| b.linvel()) 
+            .unwrap_or(glam::Vec3::ZERO)
+    }
+
+    pub fn teleport_entity(&mut self, entity_id: u64, pos: glam::Vec3, rot: glam::Quat) {
+        if let Some(&handle) = self.entity_to_body.get(&entity_id) {
+            if let Some(body) = self.rigid_body_set.get_mut(handle) {
+                body.set_position(transform_to_pose(pos, rot), true);
+                body.set_linvel(glam::Vec3::ZERO, true);
+                body.set_angvel(glam::Vec3::ZERO, true);
+            }
+        }
+    }
+
+    // --- Pipeline Sync ---
+
     pub fn sync_from_ecs(&mut self, world: &World) {
         let mut active_entities = HashSet::new();
 
@@ -91,7 +240,7 @@ impl PhysicsWorld {
 
                 let mut builder = RigidBodyBuilder::new(rb_type)
                     .pose(transform_to_pose(transform.position, transform.rotation))
-                    .additional_mass(rb_comp.mass.max(0.001)) 
+                    .additional_mass(rb_comp.mass.max(0.001))
                     .linear_damping(rb_comp.linear_damping)
                     .angular_damping(rb_comp.angular_damping)
                     .gravity_scale(rb_comp.gravity_scale)
