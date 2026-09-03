@@ -1210,6 +1210,7 @@ dependencies = [
  "egui-wgpu",
  "egui-winit",
  "glam 0.33.6",
+ "image",
  "log",
  "pollster",
  "rapier3d",

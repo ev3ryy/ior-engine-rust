@@ -4,14 +4,13 @@ use image::{ImageBuffer, RgbaImage};
 use rayon::prelude::*;
 use sha2::{Digest, Sha256};
 use shared::{
-    BakedAlphaMode, BakedLight, BakedLightType, BakedMaterial, BakedMesh, BakedModel, BakedNode,
-    BakedVertex,
+    BakedAlphaMode, BakedLight, BakedLightType, BakedMaterial, BakedMesh, BakedModel, BakedNode, BakedVertex,
 };
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
-use std::path::{Path};
+use std::path::Path;
 
 // --- Mikktspace Tangent Generator ---
 struct MeshBuffer<'a> {
@@ -106,6 +105,15 @@ fn cook_single_texture(
                     ImageBuffer::from_raw(img_data.width, img_data.height, rgba)
                         .context("Failed to create RgbaImage from RGB8")?
                 }
+                // 8-bit RG (2 channels) -> RGBA
+                gltf::image::Format::R8G8 => {
+                    let mut rgba = Vec::with_capacity((img_data.width * img_data.height * 4) as usize);
+                    for chunk in raw_pixels.chunks_exact(2) {
+                        rgba.extend_from_slice(&[chunk[0], chunk[1], 0, 255]);
+                    }
+                    ImageBuffer::from_raw(img_data.width, img_data.height, rgba)
+                        .context("Failed to create RgbaImage from R8G8")?
+                }
                 // 16-bit RGBA -> 8-bit RGBA
                 gltf::image::Format::R16G16B16A16 => {
                     let mut rgba = Vec::with_capacity((img_data.width * img_data.height * 4) as usize);
@@ -140,6 +148,22 @@ fn cook_single_texture(
                     }
                     ImageBuffer::from_raw(img_data.width, img_data.height, rgba)
                         .context("Failed to create RgbaImage from RGB16")?
+                }
+                // 16-bit RG (2 channels) -> 8-bit RGBA
+                gltf::image::Format::R16G16 => {
+                    let mut rgba = Vec::with_capacity((img_data.width * img_data.height * 4) as usize);
+                    for chunk in raw_pixels.chunks_exact(4) {
+                        let r = u16::from_ne_bytes([chunk[0], chunk[1]]);
+                        let g = u16::from_ne_bytes([chunk[2], chunk[3]]);
+                        rgba.extend_from_slice(&[
+                            (r >> 8) as u8,
+                            (g >> 8) as u8,
+                            0,
+                            255,
+                        ]);
+                    }
+                    ImageBuffer::from_raw(img_data.width, img_data.height, rgba)
+                        .context("Failed to create RgbaImage from R16G16")?
                 }
                 // 8-bit (Grayscale/Alpha/Roughness)
                 gltf::image::Format::R8 => {
@@ -253,10 +277,16 @@ fn main() -> Result<()> {
             Some(TextureCookJob { source, semantic })
         };
 
-        let albedo_job = extract_job(pbr.base_color_texture().map(|t| t.texture()), TextureSemantic::Albedo);
+        let mut albedo_job = extract_job(pbr.base_color_texture().map(|t| t.texture()), TextureSemantic::Albedo);
         let normal_job = extract_job(material.normal_texture().map(|t| t.texture()), TextureSemantic::Normal);
         let orm_job = extract_job(pbr.metallic_roughness_texture().map(|t| t.texture()), TextureSemantic::Orm);
         let emissive_job = extract_job(material.emissive_texture().map(|t| t.texture()), TextureSemantic::Emissive);
+
+        if let Some(sg) = material.pbr_specular_glossiness() {
+            if albedo_job.is_none() {
+                albedo_job = extract_job(sg.diffuse_texture().map(|t| t.texture()), TextureSemantic::Albedo);
+            }
+        }
 
         if let Some(j) = &albedo_job { unique_jobs.insert(j.clone()); }
         if let Some(j) = &normal_job { unique_jobs.insert(j.clone()); }
@@ -295,16 +325,25 @@ fn main() -> Result<()> {
             gltf::material::AlphaMode::Blend => BakedAlphaMode::Blend,
         };
 
+        let mut base_color_factor = pbr.base_color_factor();
+        let metallic_factor = pbr.metallic_factor();
+        let mut roughness_factor = pbr.roughness_factor();
+
+        if let Some(sg) = material.pbr_specular_glossiness() {
+            base_color_factor = sg.diffuse_factor();
+            roughness_factor = 1.0 - sg.glossiness_factor();
+        }
+
         baked_materials.push(BakedMaterial {
             name,
             diffuse_texture,
             normal_texture,
             orm_texture,
             emissive_texture,
-            base_color_factor: pbr.base_color_factor(),
+            base_color_factor,
             emissive_factor: material.emissive_factor(),
-            metallic_factor: pbr.metallic_factor(),
-            roughness_factor: pbr.roughness_factor(),
+            metallic_factor,
+            roughness_factor,
             alpha_cutoff: material.alpha_cutoff().unwrap_or(0.5),
             alpha_mode,
         });

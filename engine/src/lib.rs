@@ -221,8 +221,20 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
         event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
 
         if self.window.is_none() {
+            let icon_bytes = include_bytes!("../res/icon.png");
+            let image_decoded = image::load_from_memory(icon_bytes)
+                .expect("Failed to decode icon")
+                .into_rgba8();
+
+            let (icon_width, icon_height) = image_decoded.dimensions();
+            let icon_rgba = image_decoded.into_raw();
+
+            let window_icon = winit::window::Icon::from_rgba(icon_rgba, icon_width, icon_height)
+                .expect("Failed to create window icon");
+
             let window_attributes = Window::default_attributes()
                 .with_title(self.config.window_title.clone())
+                .with_window_icon(Some(window_icon))
                 .with_inner_size(winit::dpi::LogicalSize::new(
                     self.config.window_width,
                     self.config.window_height,
