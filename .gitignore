@@ -2,11 +2,17 @@
 rustc-ice-*.txt
 **/*.rs.bk
 
+/res/
+/gltf/
+
 /perf.data
 /perf.data.old
 **/target/criterion/
 **/target/tarpaulin/
 **/snapshots/
+
+.glb
+.gltf
 
 .env
 .env.*

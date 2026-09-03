@@ -8,11 +8,22 @@ pub trait Vertex {
 }
 
 #[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct MaterialUniform {
+    pub base_color_factor: [f32; 4], // 16 bytes
+    pub metallic_factor: f32,        // 4 byte
+    pub roughness_factor: f32,       // 4 byte
+    pub alpha_cutoff: f32,           // 4 byte
+    pub _padding: f32,               // 4 byte
+}
+
+#[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ModelVertex {
     pub position: [f32; 3],
     pub tex_coords: [f32; 2],
     pub normal: [f32; 3],
+    pub tangent: [f32; 4],
 }
 
 impl ModelVertex {
@@ -37,17 +48,24 @@ impl ModelVertex {
                     shader_location: 2,
                     format: wgpu::VertexFormat::Float32x3,
                 },
+                wgpu::VertexAttribute {
+                    offset: (mem::size_of::<[f32; 3]>() * 2 + mem::size_of::<[f32; 2]>()) as wgpu::BufferAddress,
+                    shader_location: 3,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
             ],
         }
     }
 }
 
 pub struct Material {
-    #[allow(unused)]
     pub name: String,
-    #[allow(unused)]
-    pub diffuse_texture: Arc<texture::Texture>,
+    pub albedo_texture: Arc<texture::Texture>,
+    pub normal_texture: Arc<texture::Texture>,
+    pub metallic_roughness_texture: Arc<texture::Texture>,
+    pub uniform_buffer: wgpu::Buffer,
     pub bind_group: wgpu::BindGroup,
+    pub has_alpha_test: bool,
 }
 
 pub struct Mesh {
@@ -57,6 +75,11 @@ pub struct Mesh {
     pub index_buffer: wgpu::Buffer,
     pub num_elements: u32,
     pub material: usize,
+
+    pub bounding_center: [f32; 3],
+    pub bounding_radius: f32,
+    pub aabb_min: [f32; 3],
+    pub aabb_max: [f32; 3],
 }
 
 pub struct Model {

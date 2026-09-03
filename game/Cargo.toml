@@ -1,0 +1,11 @@
+[package]
+name = "game"
+version = "0.1.0"
+authors = ["iLLusion of Reality"]
+edition = "2024"
+
+[dependencies]
+ecs = { path = "../ecs" }
+engine = { path = "../engine" }
+glam = "0.33.6"
+log = "0.4"
