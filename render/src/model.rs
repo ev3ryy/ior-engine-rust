@@ -78,6 +78,8 @@ pub struct Mesh {
 
     pub bounding_center: [f32; 3],
     pub bounding_radius: f32,
+    pub aabb_min: [f32; 3],
+    pub aabb_max: [f32; 3],
 }
 
 pub struct Model {

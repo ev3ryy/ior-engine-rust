@@ -89,6 +89,102 @@ impl GlobalTransform {
     }
 }
 
+// --- Physics Components (Rapier 3D) ---
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BodyType {
+    Dynamic,
+    Fixed,
+    KinematicPositionBased,
+    KinematicVelocityBased,
+}
+
+impl Default for BodyType {
+    fn default() -> Self {
+        Self::Dynamic
+    }
+}
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct RigidBodyComponent {
+    #[serde(default)]
+    pub body_type: BodyType,
+    #[serde(default = "default_mass")]
+    pub mass: f32,
+    #[serde(default = "default_damping")]
+    pub linear_damping: f32,
+    #[serde(default = "default_damping")]
+    pub angular_damping: f32,
+    #[serde(default = "default_gravity_scale")]
+    pub gravity_scale: f32,
+    #[serde(default)]
+    pub ccd_enabled: bool,
+    #[serde(default)]
+    pub lock_rotations: bool,
+}
+
+fn default_mass() -> f32 { 1.0 }
+fn default_damping() -> f32 { 0.05 }
+fn default_gravity_scale() -> f32 { 1.0 }
+
+impl Default for RigidBodyComponent {
+    fn default() -> Self {
+        Self {
+            body_type: BodyType::Dynamic,
+            mass: default_mass(),
+            linear_damping: default_damping(),
+            angular_damping: default_damping(),
+            gravity_scale: default_gravity_scale(),
+            ccd_enabled: false,
+            lock_rotations: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ColliderShapeType {
+    Cuboid,
+    Sphere,
+    Capsule,
+    Cylinder,
+}
+
+impl Default for ColliderShapeType {
+    fn default() -> Self {
+        Self::Cuboid
+    }
+}
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ColliderComponent {
+    #[serde(default)]
+    pub shape_type: ColliderShapeType,
+    #[serde(default = "default_collider_size")]
+    pub size: [f32; 3], // half-extents для Cuboid, x = radius для Sphere, [x=radius, y=half_height] для Capsule/Cylinder
+    #[serde(default = "default_friction")]
+    pub friction: f32,
+    #[serde(default = "default_restitution")]
+    pub restitution: f32,
+    #[serde(default)]
+    pub is_sensor: bool,
+}
+
+fn default_collider_size() -> [f32; 3] { [0.5, 0.5, 0.5] }
+fn default_friction() -> f32 { 0.5 }
+fn default_restitution() -> f32 { 0.0 }
+
+impl Default for ColliderComponent {
+    fn default() -> Self {
+        Self {
+            shape_type: ColliderShapeType::Cuboid,
+            size: default_collider_size(),
+            friction: default_friction(),
+            restitution: default_restitution(),
+            is_sensor: false,
+        }
+    }
+}
+
 // --- Render Components ---
 
 #[derive(Component, Debug, Clone, PartialEq, Eq)]

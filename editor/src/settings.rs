@@ -1,9 +1,8 @@
 use glam::Vec3;
+use render::postprocess::PostProcessSettings;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
-
-use render::postprocess::PostProcessSettings; 
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EditorConfig {
@@ -11,7 +10,6 @@ pub struct EditorConfig {
     pub window_width: u32,
     pub window_height: u32,
 
-    // start camera settings
     pub camera_eye: Vec3,
     pub camera_target: Vec3,
     pub camera_fovy: f32,
@@ -19,15 +17,12 @@ pub struct EditorConfig {
     pub camera_zfar: f32,
     pub camera_speed: f32,
 
-    // render
     pub enable_vsync: bool,
-    pub msaa_samples: u32,      // 1, 2, 4, 8
+    pub msaa_samples: u32,
 
-    // ECS / scene
     pub initial_grid_rows: u32,
     pub initial_grid_spacing: f32,
 
-    // Save / load
     pub world_save_path: String,
 
     #[serde(default)]
@@ -38,8 +33,8 @@ impl Default for EditorConfig {
     fn default() -> Self {
         Self {
             window_title: "IOR Engine".to_string(),
-            window_width: 800,
-            window_height: 600,
+            window_width: 1280,
+            window_height: 720,
             camera_eye: Vec3::new(0.0, 5.0, -10.0),
             camera_target: Vec3::ZERO,
             camera_fovy: 45.0,

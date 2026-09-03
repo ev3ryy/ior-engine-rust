@@ -11,6 +11,17 @@ pub enum PlayState {
     Paused { step_frame: bool, was_simulating: bool },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlayControlAction {
+    None,
+    Start,
+    Simulate,
+    Stop,
+    Pause,
+    Resume,
+    Step,
+}
+
 #[derive(Default, Debug, Clone)]
 pub struct GameInput {
     pub move_axis: glam::Vec2,

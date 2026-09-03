@@ -49,7 +49,7 @@ pub fn resolve_asset_root() -> PathBuf {
     PathBuf::from("res")
 }
 
-fn find_cooker_executable() -> Option<PathBuf> {
+pub fn find_cooker_executable() -> Option<PathBuf> {
     let mut candidates = Vec::new();
 
     if let Ok(exe) = std::env::current_exe() {

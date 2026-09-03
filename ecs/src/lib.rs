@@ -447,6 +447,116 @@ impl World {
                 f(pos, rot, light);
             });
     }
+
+    pub fn each_model_entity<F>(&self, mut f: F)
+    where
+        F: FnMut(u64, &GlobalTransform, &ModelComponent),
+    {
+        self.inner
+            .each_entity::<(&GlobalTransform, &ModelComponent)>(|entity, (global, model)| {
+                f(*entity.id(), global, model);
+            });
+    }
+
+    pub fn each_light_entity<F>(&self, mut f: F)
+    where
+        F: FnMut(u64, &GlobalTransform, &LightComponent),
+    {
+        self.inner
+            .each_entity::<(&GlobalTransform, &LightComponent)>(|entity, (global, light)| {
+                f(*entity.id(), global, light);
+            });
+    }
+
+    pub fn each_camera_entity<F>(&self, mut f: F)
+    where
+        F: FnMut(u64, &GlobalTransform, &CameraComponent),
+    {
+        self.inner
+            .each_entity::<(&GlobalTransform, &CameraComponent)>(|entity, (global, camera)| {
+                f(*entity.id(), global, camera);
+            });
+    }
+
+    pub fn each_rigid_body_entity<F>(&self, mut f: F)
+    where
+        F: FnMut(u64, &RigidBodyComponent, &Transform, Option<&ColliderComponent>),
+    {
+        self.inner
+            .each_entity::<(&RigidBodyComponent, &Transform)>(|entity, (rb_comp, transform)| {
+                let entity_id = *entity.id();
+                let collider = entity.try_get::<&ColliderComponent>(|c| *c);
+                f(entity_id, rb_comp, transform, collider.as_ref());
+            });
+    }
+
+    // --- RigidBody Component Management ---
+
+    pub fn has_rigid_body(&self, entity_id: u64) -> bool {
+        let entity = self.inner.entity_from_id(entity_id);
+        entity.is_alive() && entity.has(RigidBodyComponent::id())
+    }
+
+    pub fn add_rigid_body(&self, entity_id: u64, rb: RigidBodyComponent) {
+        let entity = self.inner.entity_from_id(entity_id);
+        if entity.is_alive() {
+            if !self.has_transform(entity_id) {
+                self.add_transform(entity_id, Transform::default());
+            }
+            entity.set(rb);
+        }
+    }
+
+    pub fn remove_rigid_body(&self, entity_id: u64) {
+        let entity = self.inner.entity_from_id(entity_id);
+        if entity.is_alive() {
+            entity.remove(RigidBodyComponent::id());
+        }
+    }
+
+    pub fn get_rigid_body_mut<F>(&self, entity_id: u64, mut f: F)
+    where
+        F: FnMut(&mut RigidBodyComponent),
+    {
+        let entity = self.inner.entity_from_id(entity_id);
+        if entity.is_alive() {
+            entity.try_get::<&mut RigidBodyComponent>(|r| f(r));
+        }
+    }
+
+    // --- Collider Component Management ---
+
+    pub fn has_collider(&self, entity_id: u64) -> bool {
+        let entity = self.inner.entity_from_id(entity_id);
+        entity.is_alive() && entity.has(ColliderComponent::id())
+    }
+
+    pub fn add_collider(&self, entity_id: u64, collider: ColliderComponent) {
+        let entity = self.inner.entity_from_id(entity_id);
+        if entity.is_alive() {
+            if !self.has_transform(entity_id) {
+                self.add_transform(entity_id, Transform::default());
+            }
+            entity.set(collider);
+        }
+    }
+
+    pub fn remove_collider(&self, entity_id: u64) {
+        let entity = self.inner.entity_from_id(entity_id);
+        if entity.is_alive() {
+            entity.remove(ColliderComponent::id());
+        }
+    }
+
+    pub fn get_collider_mut<F>(&self, entity_id: u64, mut f: F)
+    where
+        F: FnMut(&mut ColliderComponent),
+    {
+        let entity = self.inner.entity_from_id(entity_id);
+        if entity.is_alive() {
+            entity.try_get::<&mut ColliderComponent>(|c| f(c));
+        }
+    }
 }
 
 pub fn create_world() -> World {
@@ -458,6 +568,8 @@ pub fn create_world() -> World {
     world.component::<CameraComponent>();
     world.component::<LightComponent>();
     world.component::<ModelComponent>();
+    world.component::<RigidBodyComponent>();
+    world.component::<ColliderComponent>();
     world.component::<Static>();
     world.component::<Dynamic>();
     world.component::<SceneEntity>();

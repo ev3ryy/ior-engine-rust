@@ -223,6 +223,8 @@ where
             material: valid_material_id,
             bounding_center: m.bounding_center,
             bounding_radius: m.bounding_radius,
+            aabb_min: m.aabb_min,
+            aabb_max: m.aabb_max,
         });
     }
 

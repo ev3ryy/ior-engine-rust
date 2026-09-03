@@ -1,6 +1,6 @@
 use super::{
     reflection::{RonDeserializer, RonSerializer},
-    CameraComponent, Dynamic, EntityName, GlobalTransform, LightComponent, ModelComponent,
+    CameraComponent, Dynamic, EntityName, GlobalTransform, LightComponent, ModelComponent, RigidBodyComponent, ColliderComponent,
     SceneEntity, Static, Transform, World,
 };
 use flecs_ecs::prelude::*;
@@ -64,6 +64,10 @@ pub struct EntityRecord {
     pub model: Option<SavedModel>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub light: Option<LightComponent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rigid_body: Option<RigidBodyComponent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collider: Option<ColliderComponent>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub components: BTreeMap<String, BTreeMap<String, ron::Value>>,
     #[serde(default)]
@@ -124,6 +128,9 @@ pub fn create_world_snapshot(world: &World) -> anyhow::Result<Vec<u8>> {
         let is_static = entity.has(Static::id());
         let is_dynamic = entity.has(Dynamic::id());
 
+        let rigid_body = entity.try_get::<&RigidBodyComponent>(|r| *r);
+        let collider = entity.try_get::<&ColliderComponent>(|c| *c);
+
         records.push(EntityRecord {
             name,
             parent_index,
@@ -131,6 +138,8 @@ pub fn create_world_snapshot(world: &World) -> anyhow::Result<Vec<u8>> {
             camera,
             model,
             light,
+            rigid_body,
+            collider,
             components: custom_components,
             is_static,
             is_dynamic,
@@ -189,6 +198,14 @@ pub fn restore_world_snapshot(world: &mut World, bytes: &[u8]) -> anyhow::Result
 
         if let Some(l) = &record.light {
             entity.set(l.clone());
+        }
+
+        if let Some(rb) = record.rigid_body {
+            entity.set(rb);
+        }
+
+        if let Some(col) = record.collider {
+            entity.set(col);
         }
 
         for (comp_name, comp_fields) in &record.components {

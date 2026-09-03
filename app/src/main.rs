@@ -15,7 +15,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     let game_plugin = Box::new(MyGamePlugin::default());
-    let editor_app = Editor::new(editor_config, game_plugin);
+    let editor_app = Editor::new(editor_config);
 
-    run(engine_config, editor_app)
+    run(engine_config, editor_app, game_plugin)
 }

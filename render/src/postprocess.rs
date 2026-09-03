@@ -71,7 +71,7 @@ impl Default for PostProcessSettings {
             bloom_knee: 0.5,
             bloom_scatter: 1.0,
 
-            vignette_enabled: true,
+            vignette_enabled: false,
             vignette_intensity: 0.35,
             vignette_radius: 0.75,
             vignette_smoothness: 0.45,
