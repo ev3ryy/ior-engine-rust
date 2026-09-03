@@ -62,6 +62,9 @@ pub struct AssetBrowserState {
     pub needs_refresh: bool,
 
     pub cooking_assets: Arc<Mutex<HashSet<PathBuf>>>,
+
+    pub renaming_path: Option<PathBuf>,
+    pub rename_buffer: String,
 }
 
 impl Default for AssetBrowserState {
@@ -83,8 +86,55 @@ impl Default for AssetBrowserState {
             folder_tree: None,
             needs_refresh: true,
             cooking_assets: Arc::new(Mutex::new(HashSet::new())),
+            renaming_path: None,
+            rename_buffer: String::new(),
         }
     }
+}
+
+fn create_new_folder(ctx: &mut EditorContext) {
+    let current_dir = ctx.asset_browser_state.current_dir.clone();
+    let mut folder_name = "New Folder".to_string();
+    let mut counter = 1;
+    let mut target_path = current_dir.join(&folder_name);
+
+    while target_path.exists() {
+        folder_name = format!("New Folder ({})", counter);
+        target_path = current_dir.join(&folder_name);
+        counter += 1;
+    }
+
+    if let Ok(_) = fs::create_dir(&target_path) {
+        ctx.asset_browser_state.needs_refresh = true;
+        ctx.asset_browser_state.selected_file = Some(target_path.clone());
+        ctx.asset_browser_state.renaming_path = Some(target_path);
+        ctx.asset_browser_state.rename_buffer = folder_name;
+    }
+}
+
+fn commit_rename(ctx: &mut EditorContext, old_path: &Path) {
+    let new_name = ctx.asset_browser_state.rename_buffer.trim();
+    if !new_name.is_empty() {
+        let new_path = old_path.with_file_name(new_name);
+        if new_path != old_path && !new_path.exists() {
+            if fs::rename(old_path, &new_path).is_ok() {
+                if ctx.asset_browser_state.selected_file.as_deref() == Some(old_path) {
+                    ctx.asset_browser_state.selected_file = Some(new_path.clone());
+                }
+                if ctx.asset_browser_state.current_dir == old_path {
+                    ctx.asset_browser_state.current_dir = new_path;
+                }
+                ctx.asset_browser_state.needs_refresh = true;
+            }
+        }
+    }
+    ctx.asset_browser_state.renaming_path = None;
+    ctx.asset_browser_state.rename_buffer.clear();
+}
+
+fn cancel_rename(ctx: &mut EditorContext) {
+    ctx.asset_browser_state.renaming_path = None;
+    ctx.asset_browser_state.rename_buffer.clear();
 }
 
 pub fn draw_asset_browser(ui: &mut Ui, ctx: &mut EditorContext) {
@@ -228,6 +278,10 @@ fn draw_top_bar(ui: &mut Ui, ctx: &mut EditorContext) {
             ctx.asset_browser_state.cached_model_info = None;
         }
 
+        if ui.button("➕ Folder").on_hover_text("Create new folder").clicked() {
+            create_new_folder(ctx);
+        }
+
         ui.separator();
 
         let rel_path = current_dir.strip_prefix(&root_dir).unwrap_or(&current_dir);
@@ -300,6 +354,28 @@ fn draw_cached_folder_tree(ui: &mut Ui, node: &FolderTree, ctx: &mut EditorConte
 }
 
 fn draw_file_view(ui: &mut Ui, ctx: &mut EditorContext) {
+    if !ui.ctx().egui_wants_keyboard_input() {
+        if let Some(selected_path) = ctx.asset_browser_state.selected_file.clone() {
+            if ui.input(|i| i.key_pressed(egui::Key::F2)) {
+                let name = selected_path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                ctx.asset_browser_state.renaming_path = Some(selected_path.clone());
+                ctx.asset_browser_state.rename_buffer = name;
+            }
+
+            if ui.input(|i| i.key_pressed(egui::Key::Delete)) {
+                if selected_path.is_dir() {
+                    let _ = fs::remove_dir_all(&selected_path);
+                } else {
+                    let _ = fs::remove_file(&selected_path);
+                }
+                ctx.asset_browser_state.selected_file = None;
+                ctx.asset_browser_state.cached_model_info = None;
+                ctx.asset_browser_state.selected_file_size_kb = None;
+                ctx.asset_browser_state.needs_refresh = true;
+            }
+        }
+    }
+
     let search_lower = ctx.asset_browser_state.search_query.to_lowercase();
     let filter = ctx.asset_browser_state.category_filter;
     let view_mode = ctx.asset_browser_state.view_mode;
@@ -363,6 +439,34 @@ fn draw_file_view(ui: &mut Ui, ctx: &mut EditorContext) {
                         });
                     }
                 });
+
+                let remaining_size = ui.available_size();
+                let (bg_rect, bg_resp) = ui.allocate_exact_size(
+                    Vec2::new(ui.available_width(), remaining_size.y.max(60.0)),
+                    Sense::click(),
+                );
+
+                if bg_resp.clicked() {
+                    ctx.asset_browser_state.selected_file = None;
+                    ctx.asset_browser_state.cached_model_info = None;
+                    ctx.asset_browser_state.selected_file_size_kb = None;
+                }
+
+                bg_resp.context_menu(|ui| {
+                    if ui.button("📁 New Folder").clicked() {
+                        create_new_folder(ctx);
+                        ui.close();
+                    }
+                    ui.separator();
+                    if ui.button("↻ Refresh").clicked() {
+                        ctx.asset_browser_state.needs_refresh = true;
+                        ui.close();
+                    }
+                    if ui.button("📂 Show in Explorer").clicked() {
+                        reveal_in_explorer(&ctx.asset_browser_state.current_dir);
+                        ui.close();
+                    }
+                });
             } else {
                 for folder in folders {
                     draw_folder_list_item(ui, folder, ctx);
@@ -377,10 +481,15 @@ fn draw_file_view(ui: &mut Ui, ctx: &mut EditorContext) {
 fn draw_folder_card(ui: &mut Ui, entry: &CachedDirEntry, ctx: &mut EditorContext) {
     let size = ctx.asset_browser_state.icon_size;
     let card_size = Vec2::new(size + 16.0, size + 28.0);
+    
+    let is_selected = ctx.asset_browser_state.selected_file.as_deref() == Some(&entry.path);
+    let is_renaming = ctx.asset_browser_state.renaming_path.as_deref() == Some(&entry.path);
 
     let (rect, resp) = ui.allocate_exact_size(card_size, Sense::click());
 
-    let bg_color = if resp.hovered() {
+    let bg_color = if is_selected {
+        Color32::from_rgb(45, 80, 120)
+    } else if resp.hovered() {
         Color32::from_rgb(50, 55, 65)
     } else {
         Color32::from_rgb(35, 38, 45)
@@ -395,14 +504,40 @@ fn draw_folder_card(ui: &mut Ui, entry: &CachedDirEntry, ctx: &mut EditorContext
         Color32::GOLD,
     );
 
-    let truncated = truncate_string(&entry.name, 12);
-    ui.painter().text(
-        rect.center_bottom() - Vec2::new(0.0, 6.0),
-        egui::Align2::CENTER_BOTTOM,
-        truncated,
-        egui::FontId::proportional(11.0),
-        Color32::WHITE,
-    );
+    if is_renaming {
+        let text_rect = egui::Rect::from_min_size(
+            rect.center_bottom() - Vec2::new((rect.width() * 0.9) * 0.5, 22.0),
+            Vec2::new(rect.width() * 0.9, 18.0),
+        );
+        let text_res = ui.put(
+            text_rect,
+            egui::TextEdit::singleline(&mut ctx.asset_browser_state.rename_buffer)
+                .font(egui::FontId::proportional(11.0)),
+        );
+
+        if text_res.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            commit_rename(ctx, &entry.path);
+        } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            cancel_rename(ctx);
+        } else if !text_res.has_focus() {
+            text_res.request_focus();
+        }
+    } else {
+        let truncated = truncate_string(&entry.name, 12);
+        ui.painter().text(
+            rect.center_bottom() - Vec2::new(0.0, 6.0),
+            egui::Align2::CENTER_BOTTOM,
+            truncated,
+            egui::FontId::proportional(11.0),
+            Color32::WHITE,
+        );
+    }
+
+    if resp.clicked() || resp.secondary_clicked() {
+        ctx.asset_browser_state.selected_file = Some(entry.path.clone());
+        ctx.asset_browser_state.cached_model_info = None;
+        ctx.asset_browser_state.selected_file_size_kb = None;
+    }
 
     if resp.double_clicked() {
         ctx.asset_browser_state.current_dir = entry.path.clone();
@@ -412,13 +547,31 @@ fn draw_folder_card(ui: &mut Ui, entry: &CachedDirEntry, ctx: &mut EditorContext
     }
 
     resp.context_menu(|ui| {
-        if ui.button("Open Folder").clicked() {
+        if ui.button("📂 Open Folder").clicked() {
             ctx.asset_browser_state.current_dir = entry.path.clone();
             ctx.asset_browser_state.needs_refresh = true;
+            ctx.asset_browser_state.selected_file = None;
             ui.close();
         }
-        if ui.button("Show in Explorer").clicked() {
+        if ui.button("📁 New Folder Inside").clicked() {
+            ctx.asset_browser_state.current_dir = entry.path.clone();
+            create_new_folder(ctx);
+            ui.close();
+        }
+        if ui.button("✏ Rename (F2)").clicked() {
+            ctx.asset_browser_state.renaming_path = Some(entry.path.clone());
+            ctx.asset_browser_state.rename_buffer = entry.name.clone();
+            ui.close();
+        }
+        if ui.button("📂 Show in Explorer").clicked() {
             reveal_in_explorer(&entry.path);
+            ui.close();
+        }
+        ui.separator();
+        if ui.button(RichText::new("🗑 Delete (Del)").color(Color32::RED)).clicked() {
+            let _ = fs::remove_dir_all(&entry.path);
+            ctx.asset_browser_state.needs_refresh = true;
+            ctx.asset_browser_state.selected_file = None;
             ui.close();
         }
     });
@@ -427,7 +580,9 @@ fn draw_folder_card(ui: &mut Ui, entry: &CachedDirEntry, ctx: &mut EditorContext
 fn draw_file_card(ui: &mut Ui, entry: &CachedDirEntry, ctx: &mut EditorContext) {
     let size = ctx.asset_browser_state.icon_size;
     let card_size = Vec2::new(size + 16.0, size + 28.0);
+    
     let is_selected = ctx.asset_browser_state.selected_file.as_deref() == Some(&entry.path);
+    let is_renaming = ctx.asset_browser_state.renaming_path.as_deref() == Some(&entry.path);
 
     let (icon, icon_color) = match entry.ext.as_str() {
         "bin" => ("📐", Color32::from_rgb(100, 200, 255)),
@@ -448,7 +603,7 @@ fn draw_file_card(ui: &mut Ui, entry: &CachedDirEntry, ctx: &mut EditorContext) 
     };
 
     ui.painter().rect_filled(rect, 4.0, bg_color);
-    
+
     let is_cooking = {
         let lock = ctx.asset_browser_state.cooking_assets.lock().unwrap();
         lock.contains(&entry.path)
@@ -469,31 +624,161 @@ fn draw_file_card(ui: &mut Ui, entry: &CachedDirEntry, ctx: &mut EditorContext) 
         );
     }
 
-    let truncated = truncate_string(&entry.name, 12);
-    ui.painter().text(
-        rect.center_bottom() - Vec2::new(0.0, 6.0),
-        egui::Align2::CENTER_BOTTOM,
-        truncated,
-        egui::FontId::proportional(11.0),
-        Color32::WHITE,
-    );
+    if is_renaming {
+        let text_rect = egui::Rect::from_min_size(
+            rect.center_bottom() - Vec2::new((rect.width() * 0.9) * 0.5, 22.0),
+            Vec2::new(rect.width() * 0.9, 18.0),
+        );
+        let text_res = ui.put(
+            text_rect,
+            egui::TextEdit::singleline(&mut ctx.asset_browser_state.rename_buffer)
+                .font(egui::FontId::proportional(11.0)),
+        );
 
-    handle_file_interactions(&resp, entry, ctx);
+        if text_res.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            commit_rename(ctx, &entry.path);
+        } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            cancel_rename(ctx);
+        } else if !text_res.has_focus() {
+            text_res.request_focus();
+        }
+    } else {
+        let truncated = truncate_string(&entry.name, 12);
+        ui.painter().text(
+            rect.center_bottom() - Vec2::new(0.0, 6.0),
+            egui::Align2::CENTER_BOTTOM,
+            truncated,
+            egui::FontId::proportional(11.0),
+            Color32::WHITE,
+        );
+    }
+
+    if resp.clicked() || resp.secondary_clicked() {
+        ctx.asset_browser_state.selected_file = Some(entry.path.clone());
+        ctx.asset_browser_state.selected_file_size_kb = fs::metadata(&entry.path).ok().map(|m| m.len() as f32 / 1024.0);
+
+        if entry.ext == "bin" {
+            ctx.asset_browser_state.cached_model_info = read_model_info(&entry.path);
+        } else {
+            ctx.asset_browser_state.cached_model_info = None;
+        }
+    }
+
+    if resp.drag_started() && entry.ext == "bin" {
+        ctx.asset_browser_state.dragged_asset = Some(entry.path.clone());
+    }
+
+    if resp.double_clicked() && entry.ext == "bin" {
+        spawn_model_in_scene(&entry.path, ctx);
+    }
+
+    resp.context_menu(|ui| {
+        if entry.ext == "bin" {
+            if ui.button("➕ Spawn in Scene").clicked() {
+                spawn_model_in_scene(&entry.path, ctx);
+                ui.close();
+            }
+        }
+
+        if entry.ext == "glb" || entry.ext == "gltf" {
+            if ui.button("🔥 Cook to .bin").clicked() {
+                let cooking_tasks = ctx.asset_browser_state.cooking_assets.clone();
+                cook_asset(&entry.path, cooking_tasks);
+                ui.close();
+            }
+        }
+
+        if ui.button("✏ Rename (F2)").clicked() {
+            ctx.asset_browser_state.renaming_path = Some(entry.path.clone());
+            ctx.asset_browser_state.rename_buffer = entry.name.clone();
+            ui.close();
+        }
+
+        if ui.button("📂 Show in Explorer").clicked() {
+            reveal_in_explorer(&entry.path);
+            ui.close();
+        }
+
+        ui.separator();
+        if ui.button(RichText::new("🗑 Delete (Del)").color(Color32::RED)).clicked() {
+            let _ = fs::remove_file(&entry.path);
+            ctx.asset_browser_state.needs_refresh = true;
+            ctx.asset_browser_state.selected_file = None;
+            ctx.asset_browser_state.cached_model_info = None;
+            ctx.asset_browser_state.selected_file_size_kb = None;
+            ui.close();
+        }
+    });
 }
 
 fn draw_folder_list_item(ui: &mut Ui, entry: &CachedDirEntry, ctx: &mut EditorContext) {
+    let is_selected = ctx.asset_browser_state.selected_file.as_deref() == Some(&entry.path);
+    let is_renaming = ctx.asset_browser_state.renaming_path.as_deref() == Some(&entry.path);
+
     ui.horizontal(|ui| {
-        let resp = ui.selectable_label(false, format!("📁 {}", entry.name));
-        if resp.double_clicked() {
-            ctx.asset_browser_state.current_dir = entry.path.clone();
-            ctx.asset_browser_state.needs_refresh = true;
-            ctx.asset_browser_state.selected_file = None;
+        if is_renaming {
+            ui.label("📁");
+            let text_res = ui.add(
+                egui::TextEdit::singleline(&mut ctx.asset_browser_state.rename_buffer).desired_width(180.0),
+            );
+            if text_res.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                commit_rename(ctx, &entry.path);
+            } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                cancel_rename(ctx);
+            } else if !text_res.has_focus() {
+                text_res.request_focus();
+            }
+        } else {
+            let resp = ui.selectable_label(is_selected, format!("📁 {}", entry.name));
+
+            if resp.clicked() || resp.secondary_clicked() {
+                ctx.asset_browser_state.selected_file = Some(entry.path.clone());
+                ctx.asset_browser_state.cached_model_info = None;
+                ctx.asset_browser_state.selected_file_size_kb = None;
+            }
+
+            if resp.double_clicked() {
+                ctx.asset_browser_state.current_dir = entry.path.clone();
+                ctx.asset_browser_state.needs_refresh = true;
+                ctx.asset_browser_state.selected_file = None;
+            }
+
+            resp.context_menu(|ui| {
+                if ui.button("📂 Open Folder").clicked() {
+                    ctx.asset_browser_state.current_dir = entry.path.clone();
+                    ctx.asset_browser_state.needs_refresh = true;
+                    ctx.asset_browser_state.selected_file = None;
+                    ui.close();
+                }
+                if ui.button("📁 New Folder Inside").clicked() {
+                    ctx.asset_browser_state.current_dir = entry.path.clone();
+                    create_new_folder(ctx);
+                    ui.close();
+                }
+                if ui.button("✏ Rename (F2)").clicked() {
+                    ctx.asset_browser_state.renaming_path = Some(entry.path.clone());
+                    ctx.asset_browser_state.rename_buffer = entry.name.clone();
+                    ui.close();
+                }
+                if ui.button("📂 Show in Explorer").clicked() {
+                    reveal_in_explorer(&entry.path);
+                    ui.close();
+                }
+                ui.separator();
+                if ui.button(RichText::new("🗑 Delete (Del)").color(Color32::RED)).clicked() {
+                    let _ = fs::remove_dir_all(&entry.path);
+                    ctx.asset_browser_state.needs_refresh = true;
+                    ctx.asset_browser_state.selected_file = None;
+                    ui.close();
+                }
+            });
         }
     });
 }
 
 fn draw_file_list_item(ui: &mut Ui, entry: &CachedDirEntry, ctx: &mut EditorContext) {
     let is_selected = ctx.asset_browser_state.selected_file.as_deref() == Some(&entry.path);
+    let is_renaming = ctx.asset_browser_state.renaming_path.as_deref() == Some(&entry.path);
 
     let icon = match entry.ext.as_str() {
         "bin" => "📐",
@@ -513,10 +798,75 @@ fn draw_file_list_item(ui: &mut Ui, entry: &CachedDirEntry, ctx: &mut EditorCont
             ui.spinner();
         }
 
-        let resp = ui.selectable_label(is_selected, format!("{} {}", icon, entry.name))
-            .interact(Sense::click_and_drag());
-        
-        handle_file_interactions(&resp, entry, ctx);
+        if is_renaming {
+            ui.label(icon);
+            let text_res = ui.add(
+                egui::TextEdit::singleline(&mut ctx.asset_browser_state.rename_buffer).desired_width(180.0),
+            );
+            if text_res.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                commit_rename(ctx, &entry.path);
+            } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                cancel_rename(ctx);
+            } else if !text_res.has_focus() {
+                text_res.request_focus();
+            }
+        } else {
+            let resp = ui.selectable_label(is_selected, format!("{} {}", icon, entry.name))
+                .interact(Sense::click_and_drag());
+
+            if resp.clicked() || resp.secondary_clicked() {
+                ctx.asset_browser_state.selected_file = Some(entry.path.clone());
+                ctx.asset_browser_state.selected_file_size_kb = fs::metadata(&entry.path).ok().map(|m| m.len() as f32 / 1024.0);
+
+                if entry.ext == "bin" {
+                    ctx.asset_browser_state.cached_model_info = read_model_info(&entry.path);
+                } else {
+                    ctx.asset_browser_state.cached_model_info = None;
+                }
+            }
+
+            if resp.drag_started() && entry.ext == "bin" {
+                ctx.asset_browser_state.dragged_asset = Some(entry.path.clone());
+            }
+
+            if resp.double_clicked() && entry.ext == "bin" {
+                spawn_model_in_scene(&entry.path, ctx);
+            }
+
+            resp.context_menu(|ui| {
+                if entry.ext == "bin" {
+                    if ui.button("➕ Spawn in Scene").clicked() {
+                        spawn_model_in_scene(&entry.path, ctx);
+                        ui.close();
+                    }
+                }
+                if entry.ext == "glb" || entry.ext == "gltf" {
+                    if ui.button("🔥 Cook to .bin").clicked() {
+                        let cooking_tasks = ctx.asset_browser_state.cooking_assets.clone();
+                        cook_asset(&entry.path, cooking_tasks);
+                        ui.close();
+                    }
+                }
+                if ui.button("✏ Rename (F2)").clicked() {
+                    ctx.asset_browser_state.renaming_path = Some(entry.path.clone());
+                    ctx.asset_browser_state.rename_buffer = entry.name.clone();
+                    ui.close();
+                }
+                if ui.button("📂 Show in Explorer").clicked() {
+                    reveal_in_explorer(&entry.path);
+                    ui.close();
+                }
+                ui.separator();
+                if ui.button(RichText::new("🗑 Delete (Del)").color(Color32::RED)).clicked() {
+                    let _ = fs::remove_file(&entry.path);
+                    ctx.asset_browser_state.needs_refresh = true;
+                    ctx.asset_browser_state.selected_file = None;
+                    ctx.asset_browser_state.cached_model_info = None;
+                    ctx.asset_browser_state.selected_file_size_kb = None;
+                    ui.close();
+                }
+            });
+        }
     });
 }
 

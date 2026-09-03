@@ -10,11 +10,47 @@ pub fn draw_inspector(ui: &mut Ui, ctx: &mut EditorContext) {
             return;
         }
 
+        let name_edit_id = ui.make_persistent_id("inspector_entity_name_edit");
+        let mut request_focus_name = false;
+
+        if !ui.ctx().egui_wants_keyboard_input() {
+            if ui.input(|i| i.key_pressed(egui::Key::Delete)) {
+                ctx.world.delete_entity(entity_id);
+                *ctx.selected_entity = None;
+                return;
+            }
+
+            if ui.input(|i| i.key_pressed(egui::Key::F2)) {
+                request_focus_name = true;
+            }
+        }
+
         ui.horizontal(|ui| {
             let mut name = ctx.world.get_entity_name(entity_id);
-            if ui.text_edit_singleline(&mut name).changed() {
+            let name_edit_resp = ui.add(
+                egui::TextEdit::singleline(&mut name)
+                    .id(name_edit_id)
+                    .hint_text("Entity name (F2)"),
+            );
+
+            if request_focus_name {
+                name_edit_resp.request_focus();
+            }
+
+            if name_edit_resp.changed() {
                 ctx.world.set_entity_name(entity_id, &name);
             }
+
+            if ui
+                .button(RichText::new("🗑 Delete").color(Color32::RED))
+                .on_hover_text("Delete Entity (Del)")
+                .clicked()
+            {
+                ctx.world.delete_entity(entity_id);
+                *ctx.selected_entity = None;
+                return;
+            }
+
             if ui.button("✖ Deselect").clicked() {
                 *ctx.selected_entity = None;
                 return;
@@ -376,7 +412,7 @@ pub fn draw_inspector(ui: &mut Ui, ctx: &mut EditorContext) {
             });
 
             ui.add_space(15.0);
-            if ui.button(RichText::new("🗑 Delete Entity").color(Color32::RED)).clicked() {
+            if ui.button(RichText::new("🗑 Delete Entity (Del)").color(Color32::RED)).clicked() {
                 ctx.world.delete_entity(entity_id);
                 *ctx.selected_entity = None;
             }
