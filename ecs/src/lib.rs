@@ -393,6 +393,16 @@ impl World {
         }
     }
 
+    pub fn get_model_mut<F>(&self, entity_id: u64, mut f: F)
+    where
+        F: FnMut(&mut ModelComponent),
+    {
+        let entity = self.inner.entity_from_id(entity_id);
+        if entity.is_alive() {
+            entity.try_get::<&mut ModelComponent>(|m| f(m));
+        }
+    }
+
     pub fn remove_model(&self, entity_id: u64) {
         let entity = self.inner.entity_from_id(entity_id);
         if entity.is_alive() {
@@ -580,6 +590,32 @@ impl World {
         }
     }
 
+    pub fn get_active_game_cameras(&self) -> Vec<(glam::Vec3, glam::Quat, CameraComponent)> {
+        let mut cameras = Vec::new();
+
+        self.inner.each::<(&GlobalTransform, &CameraComponent)>(|(global, camera)| {
+            if camera.is_active {
+                let (_, rot, pos) = global.0.to_scale_rotation_translation();
+                cameras.push((pos, rot, *camera));
+            }
+        });
+
+        cameras.sort_by_key(|(_, _, cam)| cam.priority);
+        cameras
+    }
+
+    pub fn each_model_for_mask<F>(&self, mask: u32, mut f: F)
+    where
+        F: FnMut(&GlobalTransform, &ModelComponent),
+    {
+        self.inner
+            .each::<(&GlobalTransform, &ModelComponent)>(|(global, model)| {
+                if (model.render_layer & mask) != 0 {
+                    f(global, model);
+                }
+            });
+    }
+
     // --- CharacterController Component Management ---
 
     pub fn has_character_controller(&self, entity_id: u64) -> bool {
@@ -620,6 +656,39 @@ impl World {
         let entity = self.inner.entity_from_id(entity_id);
         if entity.is_alive() {
             entity.try_get::<&mut CharacterControllerComponent>(|k| f(k));
+        }
+    }
+
+    // --- PrefabRef Management ---
+
+    pub fn has_prefab_ref(&self, entity_id: u64) -> bool {
+        let entity = self.inner.entity_from_id(entity_id);
+        entity.is_alive() && entity.has(PrefabRef::id())
+    }
+
+    pub fn add_prefab_ref(&self, entity_id: u64, prefab_ref: PrefabRef) {
+        let entity = self.inner.entity_from_id(entity_id);
+        if entity.is_alive() {
+            entity.set(prefab_ref);
+        }
+    }
+
+    pub fn remove_prefab_ref(&self, entity_id: u64) {
+        let entity = self.inner.entity_from_id(entity_id);
+        if entity.is_alive() {
+            entity.remove(PrefabRef::id());
+        }
+    }
+
+    pub fn get_prefab_ref<F, R>(&self, entity_id: u64, mut f: F) -> Option<R>
+    where
+        F: FnMut(&PrefabRef) -> R,
+    {
+        let entity = self.inner.entity_from_id(entity_id);
+        if entity.is_alive() {
+            entity.try_get::<&PrefabRef>(|p| f(p))
+        } else {
+            None
         }
     }
 
@@ -713,6 +782,85 @@ impl World {
 
         propagate(entity, my_global);
     }
+
+    pub fn reload_prefab_instances(&self, prefab_path: &str) {
+        let Ok(prefab) = serialization::Prefab::load_from_file(prefab_path) else {
+            log::error!("[PREFAB] Failed to reload prefab file: {}", prefab_path);
+            return;
+        };
+
+        let target_path = std::path::Path::new(prefab_path);
+        let target_filename = target_path.file_name();
+
+        let mut instances = Vec::new();
+
+        self.inner.each_entity::<&PrefabRef>(|entity, pref_ref| {
+            let inst_path = std::path::Path::new(&pref_ref.path);
+            
+            let is_match = inst_path == target_path 
+                || (target_filename.is_some() && inst_path.file_name() == target_filename);
+
+            if is_match {
+                let id = *entity.id();
+                let name = self.get_entity_name(id);
+                let transform = entity.try_get::<&Transform>(|t| *t).unwrap_or_default();
+                let parent_id = entity.parent().map(|p| *p.id());
+
+                instances.push((id, name, transform, parent_id));
+            }
+        });
+
+        for (old_id, custom_name, transform, parent_id) in instances {
+            self.delete_entity(old_id);
+
+            if let Ok(new_id) = prefab.instantiate(
+                self,
+                Some(transform.position),
+                Some(transform.rotation),
+                parent_id,
+            ) {
+                self.get_transform_mut(new_id, |t| {
+                    t.scale = transform.scale;
+                });
+
+                if !custom_name.is_empty() {
+                    self.set_entity_name(new_id, &custom_name);
+                }
+
+                self.inner.entity_from_id(new_id).set(PrefabRef {
+                    path: prefab_path.replace('\\', "/"),
+                });
+            }
+        }
+
+        self.update_transforms();
+        log::info!("[PREFAB] Successfully synchronized all instances of {:?}", target_filename);
+    }
+
+    pub fn spawn_prefab(
+        &self,
+        prefab_path: &str,
+        position: glam::Vec3,
+        rotation: glam::Quat,
+    ) -> anyhow::Result<u64> {
+        let prefab = serialization::Prefab::load_from_file(prefab_path)?;
+        let root_id = prefab.instantiate(self, Some(position), Some(rotation), None)?;
+
+        self.inner.entity_from_id(root_id).set(PrefabRef {
+            path: prefab_path.replace('\\', "/"),
+        });
+
+        Ok(root_id)
+    }
+
+    pub fn save_entity_as_prefab(
+        &self,
+        entity_id: u64,
+        save_path: &str,
+    ) -> anyhow::Result<()> {
+        let prefab = serialization::Prefab::from_entity(self, entity_id)?;
+        prefab.save_to_file(save_path)
+    }
 }
 
 pub fn create_world() -> World {
@@ -727,6 +875,7 @@ pub fn create_world() -> World {
     world.component::<RigidBodyComponent>();
     world.component::<ColliderComponent>();
     world.component::<CharacterControllerComponent>();
+    world.component::<PrefabRef>();
     world.component::<Static>();
     world.component::<Dynamic>();
     world.component::<SceneEntity>();
@@ -835,6 +984,7 @@ pub fn spawn_scene_with_colliders(
             target_entity.set(ModelComponent {
                 id: asset_id,
                 mesh_index: mesh_idx,
+                render_layer: RenderLayers::DEFAULT,
             });
 
             if generate_colliders {

@@ -3,6 +3,16 @@ use flecs_ecs::prelude::*;
 use glam::{Mat4, Quat, Vec3};
 use serde::{Deserialize, Serialize};
 
+pub struct RenderLayers;
+
+impl RenderLayers {
+    pub const DEFAULT: u32   = 1 << 0;
+    pub const VIEWMODEL: u32 = 1 << 1;
+    pub const UI_3D: u32     = 1 << 2;
+    pub const ALL: u32       = u32::MAX;
+}
+
+
 // --- Camera Component ---
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -17,6 +27,11 @@ pub struct CameraComponent {
     pub is_active: bool,
     #[serde(default)]
     pub priority: i32,
+
+    #[serde(default = "default_u32_max")]
+    pub culling_mask: u32,
+    #[serde(default)]
+    pub clear_depth: bool, 
 }
 
 fn default_fovy() -> f32 { 60.0 }
@@ -32,6 +47,8 @@ impl Default for CameraComponent {
             zfar: default_zfar(),
             is_active: default_true(),
             priority: 0,
+            culling_mask: u32::MAX,
+            clear_depth: false,
         }
     }
 }
@@ -255,6 +272,25 @@ impl Default for CharacterControllerComponent {
 pub struct ModelComponent {
     pub id: AssetId,
     pub mesh_index: usize,
+    pub render_layer: u32,
+}
+
+impl ModelComponent {
+    pub fn new(id: AssetId, mesh_index: usize) -> Self {
+        Self {
+            id,
+            mesh_index,
+            render_layer: RenderLayers::DEFAULT,
+        }
+    }
+
+    pub fn with_layer(id: AssetId, mesh_index: usize, render_layer: u32) -> Self {
+        Self {
+            id,
+            mesh_index,
+            render_layer,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -300,6 +336,19 @@ impl Default for LightComponent {
             range: default_range(),
             inner_angle: 0.0,
             outer_angle: 0.0,
+        }
+    }
+}
+
+#[derive(Component, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrefabRef {
+    pub path: String,
+}
+
+impl Default for PrefabRef {
+    fn default() -> Self {
+        Self {
+            path: String::new(),
         }
     }
 }

@@ -11,6 +11,7 @@ pub enum AssetCategoryFilter {
     Models,
     Textures,
     Scenes,
+    Prefabs,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,6 +55,11 @@ pub struct AssetBrowserState {
     pub icon_size: f32,
     pub status_message: Option<(String, bool)>,
     pub dragged_asset: Option<PathBuf>,
+    pub dragged_entity: Option<u64>,
+
+    pub editing_prefab_root: Option<u64>,
+    pub editing_prefab_path: Option<PathBuf>,
+    pub prefab_scene_backup: Option<Vec<u8>>,
     
     pub cached_model_info: Option<AssetModelInfo>,
     pub selected_file_size_kb: Option<f32>,
@@ -82,6 +88,10 @@ impl Default for AssetBrowserState {
             icon_size: 72.0,
             status_message: None,
             dragged_asset: None,
+            dragged_entity: None,
+            editing_prefab_root: None,
+            editing_prefab_path: None,
+            prefab_scene_backup: None,
             cached_model_info: None,
             selected_file_size_kb: None,
             current_dir_entries: Vec::new(),
@@ -90,6 +100,123 @@ impl Default for AssetBrowserState {
             cooking_assets: Arc::new(Mutex::new(HashSet::new())),
             renaming_path: None,
             rename_buffer: String::new(),
+        }
+    }
+}
+
+pub fn open_prefab_for_editing(path: &Path, ctx: &mut EditorContext) {
+    if let Ok(snapshot) = ctx.world.create_snapshot() {
+        ctx.asset_browser_state.prefab_scene_backup = Some(snapshot);
+        ctx.world.clear_scene();
+
+        if let Ok(prefab) = ecs::serialization::Prefab::load_from_file(path) {
+            if let Ok(root_id) = prefab.instantiate(
+                ctx.world,
+                Some(glam::Vec3::ZERO),
+                Some(glam::Quat::IDENTITY),
+                None,
+            ) {
+                *ctx.selected_entity = Some(root_id);
+                ctx.asset_browser_state.editing_prefab_path = Some(path.to_path_buf());
+                ctx.asset_browser_state.editing_prefab_root = Some(root_id);
+
+                let key_light = ctx.world.spawn_empty("__PrefabPreviewKeyLight");
+                ctx.world.add_transform(key_light, ecs::Transform {
+                    position: glam::Vec3::new(4.0, 8.0, 5.0),
+                    rotation: glam::Quat::from_euler(glam::EulerRot::XYZ, -50.0f32.to_radians(), 35.0f32.to_radians(), 0.0),
+                    scale: glam::Vec3::ONE,
+                });
+                ctx.world.add_light(key_light, ecs::LightComponent {
+                    light_type: ecs::LightType::Directional,
+                    color: [1.0, 0.98, 0.95],
+                    intensity: 3.5,
+                    range: 100.0,
+                    ..Default::default()
+                });
+
+                let fill_light = ctx.world.spawn_empty("__PrefabPreviewFillLight");
+                ctx.world.add_transform(fill_light, ecs::Transform {
+                    position: glam::Vec3::new(-4.0, -4.0, -5.0),
+                    rotation: glam::Quat::from_euler(glam::EulerRot::XYZ, 40.0f32.to_radians(), -145.0f32.to_radians(), 0.0),
+                    scale: glam::Vec3::ONE,
+                });
+                ctx.world.add_light(fill_light, ecs::LightComponent {
+                    light_type: ecs::LightType::Directional,
+                    color: [0.6, 0.75, 1.0],
+                    intensity: 2.0,
+                    range: 100.0,
+                    ..Default::default()
+                });
+
+                ctx.camera.eye = glam::Vec3::new(2.0, 2.0, 3.5);
+                ctx.camera.target = glam::Vec3::new(0.0, 0.5, 0.0);
+                ctx.camera.up = glam::Vec3::Y;
+
+                log::info!("Opened clean prefab template {:?} for editing", path);
+            }
+        }
+    }
+}
+
+pub fn save_and_close_prefab_editing(ctx: &mut EditorContext, save: bool) {
+    if let Some(path) = ctx.asset_browser_state.editing_prefab_path.take() {
+        let path_str = path.to_string_lossy().replace('\\', "/");
+
+        if save {
+            if let Some(root_id) = ctx.asset_browser_state.editing_prefab_root.take() {
+                if ctx.world.is_alive(root_id) {
+                    if let Err(e) = ctx.world.save_entity_as_prefab(root_id, &path_str) {
+                        log::error!("Failed to save prefab: {e}");
+                    } else {
+                        log::info!("Prefab saved: {:?}", path);
+                    }
+                }
+            }
+        }
+
+        ctx.world.clear_scene();
+        if let Some(backup) = ctx.asset_browser_state.prefab_scene_backup.take() {
+            let _ = ctx.world.restore_snapshot(&backup);
+        }
+
+        if save {
+            ctx.world.reload_prefab_instances(&path_str);
+        }
+
+        *ctx.selected_entity = None;
+        ctx.asset_browser_state.editing_prefab_root = None;
+        ctx.asset_browser_state.needs_refresh = true;
+    }
+}
+
+pub fn save_entity_to_current_folder(ctx: &mut EditorContext, entity_id: u64) {
+    let name = ctx.world.get_entity_name(entity_id);
+    let base_name = if name.is_empty() { format!("Entity_{}", entity_id) } else { name };
+
+    let mut filename = format!("{}.prefab", base_name);
+    let mut target_path = ctx.asset_browser_state.current_dir.join(&filename);
+    let mut counter = 1;
+    while target_path.exists() {
+        filename = format!("{} ({}).prefab", base_name, counter);
+        target_path = ctx.asset_browser_state.current_dir.join(&filename);
+        counter += 1;
+    }
+
+    let path_str = target_path.to_string_lossy().replace('\\', "/");
+
+    match ctx.world.save_entity_as_prefab(entity_id, &path_str) {
+        Ok(_) => {
+            log::info!("[PREFAB] Created prefab at {:?}", target_path);
+
+            ctx.world.add_prefab_ref(entity_id, ecs::PrefabRef {
+                path: path_str,
+            });
+
+            ctx.asset_browser_state.needs_refresh = true;
+            ctx.asset_browser_state.selected_file = Some(target_path);
+        }
+        Err(e) => {
+            log::error!("[PREFAB] Failed to create prefab: {e}");
         }
     }
 }
@@ -151,6 +278,11 @@ pub fn draw_asset_browser(ui: &mut Ui, ctx: &mut EditorContext) {
         ctx.asset_browser_state.needs_refresh = false;
     }
 
+    let is_dragging_entity = ctx.asset_browser_state.dragged_entity.is_some();
+
+    // Запоминаем границы области Asset Browser
+    let browser_rect = ui.available_rect_before_wrap();
+
     egui::Frame::new().inner_margin(4.0).show(ui, |ui| {
         draw_top_bar(ui, ctx);
     });
@@ -167,7 +299,7 @@ pub fn draw_asset_browser(ui: &mut Ui, ctx: &mut EditorContext) {
 
             // ПАНЕЛЬ ПАПОК
             ui.allocate_ui_with_layout(
-                Vec2::new(folder_w, available_h), // <-- ВАЖНО: здесь должен быть folder_w, а не 180.0!
+                Vec2::new(folder_w, available_h),
                 egui::Layout::top_down(egui::Align::LEFT),
                 |ui| {
                     ui.set_min_height(available_h);
@@ -185,28 +317,15 @@ pub fn draw_asset_browser(ui: &mut Ui, ctx: &mut EditorContext) {
                 },
             );
 
-            // 2. ПОДВИЖНЫЙ РАЗДЕЛИТЕЛЬ
-            // Выделяем область потолще (8px) под захват мышью
-            let (sep_rect, _) = ui.allocate_exact_size(
-                Vec2::new(8.0, available_h),
-                Sense::hover(),
-            );
-
-            // Задаем фиксированный ID и чистый Sense::drag() для мгновенного отклика
-            let sep_resp = ui.interact(
-                sep_rect,
-                ui.id().with("folders_splitter"),
-                Sense::drag(),
-            );
+            // ПОДВИЖНЫЙ РАЗДЕЛИТЕЛЬ
+            let (sep_rect, _) = ui.allocate_exact_size(Vec2::new(8.0, available_h), Sense::hover());
+            let sep_resp = ui.interact(sep_rect, ui.id().with("folders_splitter"), Sense::drag());
 
             if sep_resp.dragged() {
                 let delta = sep_resp.drag_delta().x;
-                // Не даем схлопнуть правую часть: оставляем минимум 200px под файлы
                 let max_w = (ui.max_rect().width() - 200.0).max(120.0);
                 ctx.asset_browser_state.folder_panel_width =
                     (ctx.asset_browser_state.folder_panel_width + delta).clamp(100.0, max_w);
-                
-                // Запрашиваем перерисовку кадра при перетаскивании
                 ui.ctx().request_repaint();
             }
 
@@ -214,7 +333,6 @@ pub fn draw_asset_browser(ui: &mut Ui, ctx: &mut EditorContext) {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
             }
 
-            // Отрисовка тонкой линии ровно по центру 8-пиксельной хитбокс-зоны
             let line_color = if sep_resp.dragged() {
                 ui.visuals().widgets.active.bg_fill
             } else if sep_resp.hovered() {
@@ -222,13 +340,9 @@ pub fn draw_asset_browser(ui: &mut Ui, ctx: &mut EditorContext) {
             } else {
                 ui.visuals().widgets.noninteractive.bg_stroke.color
             };
-            ui.painter().vline(
-                sep_rect.center().x,
-                sep_rect.y_range(),
-                egui::Stroke::new(1.0, line_color),
-            );
+            ui.painter().vline(sep_rect.center().x, sep_rect.y_range(), egui::Stroke::new(1.0, line_color));
 
-            // 3. ОБЛАСТЬ ФАЙЛОВ
+            // ОБЛАСТЬ ФАЙЛОВ
             let available_w = ui.available_width() - if show_preview { 220.0 } else { 0.0 };
             ui.allocate_ui_with_layout(
                 Vec2::new(available_w.max(200.0), available_h),
@@ -253,7 +367,26 @@ pub fn draw_asset_browser(ui: &mut Ui, ctx: &mut EditorContext) {
         },
     );
 
+    // ПОДСВЕТКА ЗОНЫ СБРОСА ПРИ ПЕРЕТАСКИВАНИИ
+    if is_dragging_entity {
+        ui.painter().rect_stroke(
+            browser_rect,
+            4.0,
+            egui::Stroke::new(2.0, Color32::from_rgb(255, 215, 0)),
+            egui::StrokeKind::Inside,
+        );
+    }
+
+    // ОБРАБОТКА СБРОСА (DROP) МЫШИ
     if ui.input(|i| i.pointer.any_released()) {
+        if let Some(dragged_entity_id) = ctx.asset_browser_state.dragged_entity.take() {
+            let pointer_pos = ui.input(|i| i.pointer.interact_pos().or(i.pointer.hover_pos()));
+            if let Some(pos) = pointer_pos {
+                if browser_rect.contains(pos) {
+                    save_entity_to_current_folder(ctx, dragged_entity_id);
+                }
+            }
+        }
         ctx.asset_browser_state.dragged_asset = None;
     }
 }
@@ -360,6 +493,7 @@ fn draw_top_bar(ui: &mut Ui, ctx: &mut EditorContext) {
                     AssetCategoryFilter::Models => "📐 Models",
                     AssetCategoryFilter::Textures => "🎨 Textures",
                     AssetCategoryFilter::Scenes => "🎬 Scenes",
+                    AssetCategoryFilter::Prefabs => "🧩 Prefabs",
                 })
                 .show_ui(ui, |ui| {
                     ui.selectable_value(&mut ctx.asset_browser_state.category_filter, AssetCategoryFilter::All, "All Assets");
@@ -446,6 +580,7 @@ fn draw_file_view(ui: &mut Ui, ctx: &mut EditorContext) {
                 AssetCategoryFilter::Models => matches!(entry.ext.as_str(), "bin" | "glb" | "gltf"),
                 AssetCategoryFilter::Textures => matches!(entry.ext.as_str(), "dds" | "png" | "jpg" | "jpeg" | "tga"),
                 AssetCategoryFilter::Scenes => entry.ext == "ron",
+                AssetCategoryFilter::Prefabs => entry.ext == "prefab",
             };
 
             if matches_category {
@@ -523,6 +658,35 @@ fn draw_file_view(ui: &mut Ui, ctx: &mut EditorContext) {
                 }
             }
         });
+
+    let drop_area = ui.max_rect();
+    if ui.input(|i| i.pointer.any_released()) {
+        if let Some(entity_id) = ctx.asset_browser_state.dragged_entity.take() {
+            if let Some(mouse_pos) = ui.ctx().pointer_hover_pos() {
+                if drop_area.contains(mouse_pos) {
+                    let name = ctx.world.get_entity_name(entity_id);
+                    let clean_name = if name.is_empty() { format!("Entity_{}", entity_id) } else { name };
+                    
+                    let mut filename = format!("{}.prefab", clean_name);
+                    let mut target_path = ctx.asset_browser_state.current_dir.join(&filename);
+                    let mut counter = 1;
+                    while target_path.exists() {
+                        filename = format!("{} ({}).prefab", clean_name, counter);
+                        target_path = ctx.asset_browser_state.current_dir.join(&filename);
+                        counter += 1;
+                    }
+
+                    if let Err(e) = ctx.world.save_entity_as_prefab(entity_id, &target_path.to_string_lossy()) {
+                        log::error!("Failed to create prefab: {e}");
+                    } else {
+                        log::info!("Created prefab: {:?}", target_path);
+                        ctx.asset_browser_state.needs_refresh = true;
+                        ctx.asset_browser_state.selected_file = Some(target_path);
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn draw_folder_card(ui: &mut Ui, entry: &CachedDirEntry, ctx: &mut EditorContext) {
@@ -636,6 +800,7 @@ fn draw_file_card(ui: &mut Ui, entry: &CachedDirEntry, ctx: &mut EditorContext) 
         "glb" | "gltf" => ("📦", Color32::from_rgb(255, 180, 80)),
         "dds" | "png" | "jpg" => ("🎨", Color32::from_rgb(220, 100, 255)),
         "ron" => ("🎬", Color32::from_rgb(100, 255, 150)),
+        "prefab" => ("🧩", Color32::from_rgb(255, 215, 0)),
         _ => ("📄", Color32::LIGHT_GRAY),
     };
 
@@ -670,6 +835,33 @@ fn draw_file_card(ui: &mut Ui, entry: &CachedDirEntry, ctx: &mut EditorContext) 
             icon_color,
         );
     }
+
+    if resp.drag_started() && (entry.ext == "bin" || entry.ext == "prefab") {
+        ctx.asset_browser_state.dragged_asset = Some(entry.path.clone());
+    }
+
+    if resp.double_clicked() {
+        if entry.ext == "bin" {
+            spawn_model_in_scene(&entry.path, ctx);
+        } else if entry.ext == "prefab" {
+            open_prefab_for_editing(&entry.path, ctx);
+        }
+    }
+
+    resp.context_menu(|ui| {
+        if entry.ext == "prefab" {
+            if ui.button("➕ Spawn in Scene").clicked() {
+                let pos = ctx.camera.target;
+                let _ = ctx.world.spawn_prefab(&entry.path.to_string_lossy(), pos, glam::Quat::IDENTITY);
+                ui.close();
+            }
+            if ui.button("✏ Edit Prefab").clicked() {
+                open_prefab_for_editing(&entry.path, ctx);
+                ui.close();
+            }
+            ui.separator();
+        }
+    });
 
     if is_renaming {
         let text_rect = egui::Rect::from_min_size(
@@ -711,7 +903,7 @@ fn draw_file_card(ui: &mut Ui, entry: &CachedDirEntry, ctx: &mut EditorContext) 
         }
     }
 
-    if resp.drag_started() && entry.ext == "bin" {
+    if resp.drag_started() && (entry.ext == "bin" || entry.ext == "prefab") {
         ctx.asset_browser_state.dragged_asset = Some(entry.path.clone());
     }
 
@@ -872,7 +1064,7 @@ fn draw_file_list_item(ui: &mut Ui, entry: &CachedDirEntry, ctx: &mut EditorCont
                 }
             }
 
-            if resp.drag_started() && entry.ext == "bin" {
+            if resp.drag_started() && (entry.ext == "bin" || entry.ext == "prefab") {
                 ctx.asset_browser_state.dragged_asset = Some(entry.path.clone());
             }
 
@@ -1025,6 +1217,14 @@ fn draw_asset_preview_drawer(ui: &mut Ui, ctx: &mut EditorContext) {
         } else if ui.button("🔥 Cook to .bin").clicked() {
             let cooking_tasks = ctx.asset_browser_state.cooking_assets.clone();
             cook_asset(&selected_path, cooking_tasks);
+        }
+    } else if ext == "prefab" {
+        if ui.button("➕ Spawn in Scene").clicked() {
+            let pos = ctx.camera.target;
+            let _ = ctx.world.spawn_prefab(&selected_path.to_string_lossy(), pos, glam::Quat::IDENTITY);
+        }
+        if ui.button("✏ Edit Prefab").clicked() {
+            open_prefab_for_editing(&selected_path, ctx);
         }
     }
 

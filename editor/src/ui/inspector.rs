@@ -1,6 +1,6 @@
 use crate::ui::visitor::EguiFieldVisitor;
 use crate::ui::EditorContext;
-use ecs::{CameraComponent, ColliderComponent, ColliderShapeType, LightComponent, LightType, RigidBodyComponent, Transform};
+use ecs::{CameraComponent, ColliderComponent, ColliderShapeType, LightComponent, LightType, RigidBodyComponent, CharacterControllerComponent, Transform};
 use egui::{Color32, DragValue, RichText, ScrollArea, Slider, Ui};
 
 pub fn draw_inspector(ui: &mut Ui, ctx: &mut EditorContext) {
@@ -66,7 +66,27 @@ pub fn draw_inspector(ui: &mut Ui, ctx: &mut EditorContext) {
             let has_model = ctx.world.has_model(entity_id);
             let has_rigid_body = ctx.world.has_rigid_body(entity_id);
             let has_collider = ctx.world.has_collider(entity_id);
+            let has_character_controller = ctx.world.has_character_controller(entity_id); 
+            let has_prefab_ref = ctx.world.has_prefab_ref(entity_id);
 
+            if has_prefab_ref {
+                ui.group(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("🧩 Prefab Instance").strong().color(Color32::from_rgb(255, 215, 0)));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("❌").on_hover_text("Unlink instance from prefab").clicked() {
+                                ctx.world.remove_prefab_ref(entity_id);
+                            }
+                        });
+                    });
+
+                    ctx.world.get_prefab_ref(entity_id, |p| {
+                        ui.label(RichText::new(format!("Source: {}", p.path)).weak());
+                    });
+                });
+                ui.add_space(5.0);
+            }
+            
             // transform component
             if has_transform {
                 ui.group(|ui| {
@@ -160,6 +180,8 @@ pub fn draw_inspector(ui: &mut Ui, ctx: &mut EditorContext) {
                         ui.add(Slider::new(&mut camera.znear, 0.01..=10.0).text("Z Near"));
                         ui.add(Slider::new(&mut camera.zfar, 10.0..=10000.0).text("Z Far"));
                         ui.add(DragValue::new(&mut camera.priority).prefix("Priority: "));
+                        ui.add(DragValue::new(&mut camera.culling_mask).prefix("Culling Mask: "));
+                        ui.checkbox(&mut camera.clear_depth, "Clear Depth (Overlay)");
                     });
                 });
                 ui.add_space(5.0);
@@ -233,9 +255,10 @@ pub fn draw_inspector(ui: &mut Ui, ctx: &mut EditorContext) {
                         });
                     });
 
-                    ctx.world.get_model(entity_id, |model| {
+                    ctx.world.get_model_mut(entity_id, |model| {
                         ui.label(format!("Model ID: {:?}", model.id.path()));
                         ui.label(format!("Mesh Index: {}", model.mesh_index));
+                        ui.add(DragValue::new(&mut model.render_layer).prefix("Render Layer: "));
                     });
                 });
                 ui.add_space(5.0);
@@ -367,6 +390,70 @@ pub fn draw_inspector(ui: &mut Ui, ctx: &mut EditorContext) {
                 ui.add_space(5.0);
             }
 
+            // character controller component (KCC)
+            if has_character_controller {
+                ui.group(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("🏃 Character Controller (KCC)").strong());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .button("❌")
+                                .on_hover_text("Remove Character Controller")
+                                .clicked()
+                            {
+                                ctx.world.remove_character_controller(entity_id);
+                            }
+                        });
+                    });
+
+                    ctx.world.get_character_controller_mut(entity_id, |kcc| {
+                        ui.checkbox(&mut kcc.slide, "Slide on Obstacles");
+
+                        ui.collapsing("🪜 Autostep (Stairs)", |ui| {
+                            ui.checkbox(&mut kcc.enable_autostep, "Enable Autostep");
+                            if kcc.enable_autostep {
+                                ui.add(
+                                    DragValue::new(&mut kcc.autostep_max_height)
+                                        .speed(0.01)
+                                        .prefix("Max Step Height: ")
+                                        .suffix(" m"),
+                                );
+                                ui.add(
+                                    DragValue::new(&mut kcc.autostep_min_width)
+                                        .speed(0.01)
+                                        .prefix("Min Step Width: ")
+                                        .suffix(" m"),
+                                );
+                            }
+                        });
+
+                        ui.collapsing("📐 Slopes & Angles", |ui| {
+                            ui.add(
+                                Slider::new(&mut kcc.max_slope_climb_angle, 0.0..=89.0)
+                                    .text("Max Climb Angle (°)"),
+                            );
+                            ui.add(
+                                Slider::new(&mut kcc.min_slope_slide_angle, 0.0..=89.0)
+                                    .text("Min Slide Angle (°)"),
+                            );
+                        });
+
+                        ui.collapsing("🧲 Snap to Ground", |ui| {
+                            ui.checkbox(&mut kcc.enable_snap_to_ground, "Enable Snap to Ground");
+                            if kcc.enable_snap_to_ground {
+                                ui.add(
+                                    DragValue::new(&mut kcc.snap_to_ground_distance)
+                                        .speed(0.01)
+                                        .prefix("Snap Distance: ")
+                                        .suffix(" m"),
+                                );
+                            }
+                        });
+                    });
+                });
+                ui.add_space(5.0);
+            }
+
             // dynamic components via visitor pattern
             let dynamic_entries = ctx.world.get_component_entries();
             for entry in &dynamic_entries {
@@ -413,6 +500,10 @@ pub fn draw_inspector(ui: &mut Ui, ctx: &mut EditorContext) {
                 }
                 if !has_collider && ui.button("🛡 Collider").clicked() {
                     ctx.world.add_collider(entity_id, ColliderComponent::default());
+                    ui.close();
+                }
+                if !has_character_controller && ui.button("🏃 Character Controller").clicked() {
+                    ctx.world.add_character_controller(entity_id, CharacterControllerComponent::default());
                     ui.close();
                 }
 

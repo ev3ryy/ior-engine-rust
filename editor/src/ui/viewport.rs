@@ -62,26 +62,45 @@ pub fn draw_viewport(ui: &mut egui::Ui, ctx: &mut EditorContext) {
 
                     // spawn on release
                     if ui.input(|i| i.pointer.any_released()) {
-                        if let Ok(data) = std::fs::read(dragged_path) {
-                            if let Ok(baked_model) =
-                                rkyv::from_bytes::<shared::BakedModel, rkyv::rancor::Error>(&data)
-                            {
-                                if let Some(file_name) =
-                                    dragged_path.file_name().and_then(|n| n.to_str())
+                        let ext = dragged_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+
+                        if ext == "bin" {
+                            if let Ok(data) = std::fs::read(dragged_path) {
+                                if let Ok(baked_model) =
+                                    rkyv::from_bytes::<shared::BakedModel, rkyv::rancor::Error>(&data)
                                 {
-                                    let model_id = asset::AssetId::from_path(file_name);
-                                    let spawned_id = ecs::spawn_scene(
-                                        ctx.world,
-                                        model_id,
-                                        &baked_model,
-                                        spawn_pos,
-                                    );
+                                    if let Some(file_name) =
+                                        dragged_path.file_name().and_then(|n| n.to_str())
+                                    {
+                                        let model_id = asset::AssetId::from_path(file_name);
+                                        let spawned_id = ecs::spawn_scene(
+                                            ctx.world,
+                                            model_id,
+                                            &baked_model,
+                                            spawn_pos,
+                                        );
+                                        *ctx.selected_entity = Some(spawned_id);
+                                        ctx.load_requests.push(file_name.to_string());
+                                        log::info!("Spawned model {:?} at {}", file_name, spawn_pos);
+                                    }
+                                }
+                            }
+                        } else if ext == "prefab" {
+                            match ctx.world.spawn_prefab(
+                                &dragged_path.to_string_lossy(),
+                                spawn_pos,
+                                glam::Quat::IDENTITY,
+                            ) {
+                                Ok(spawned_id) => {
                                     *ctx.selected_entity = Some(spawned_id);
-                                    ctx.load_requests.push(file_name.to_string());
-                                    log::info!("Spawned {:?} at {}", file_name, spawn_pos);
+                                    log::info!("Spawned prefab {:?} at {}", dragged_path, spawn_pos);
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to spawn prefab {:?}: {e}", dragged_path);
                                 }
                             }
                         }
+
                         ctx.asset_browser_state.dragged_asset = None;
                     }
                 }
