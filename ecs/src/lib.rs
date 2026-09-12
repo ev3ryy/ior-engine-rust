@@ -579,6 +579,140 @@ impl World {
             entity.try_get::<&mut ColliderComponent>(|c| f(c));
         }
     }
+
+    // --- CharacterController Component Management ---
+
+    pub fn has_character_controller(&self, entity_id: u64) -> bool {
+        let entity = self.inner.entity_from_id(entity_id);
+        entity.is_alive() && entity.has(CharacterControllerComponent::id())
+    }
+
+    pub fn add_character_controller(&self, entity_id: u64, kcc: CharacterControllerComponent) {
+        let entity = self.inner.entity_from_id(entity_id);
+        if entity.is_alive() {
+            entity.set(kcc);
+        }
+    }
+
+    pub fn remove_character_controller(&self, entity_id: u64) {
+        let entity = self.inner.entity_from_id(entity_id);
+        if entity.is_alive() {
+            entity.remove(CharacterControllerComponent::id());
+        }
+    }
+
+    pub fn get_character_controller<F, R>(&self, entity_id: u64, mut f: F) -> Option<R>
+    where
+        F: FnMut(&CharacterControllerComponent) -> R,
+    {
+        let entity = self.inner.entity_from_id(entity_id);
+        if entity.is_alive() {
+            entity.try_get::<&CharacterControllerComponent>(|k| f(k))
+        } else {
+            None
+        }
+    }
+
+    pub fn get_character_controller_mut<F>(&self, entity_id: u64, mut f: F)
+    where
+        F: FnMut(&mut CharacterControllerComponent),
+    {
+        let entity = self.inner.entity_from_id(entity_id);
+        if entity.is_alive() {
+            entity.try_get::<&mut CharacterControllerComponent>(|k| f(k));
+        }
+    }
+
+    pub fn apply_physics_interpolated_transform(
+        &self,
+        entity_id: u64,
+        pos: glam::Vec3,
+        rot: glam::Quat,
+    ) {
+        let entity = self.inner.entity_from_id(entity_id);
+        if !entity.is_alive() {
+            return;
+        }
+
+        let scale = entity
+            .try_get::<&Transform>(|t| t.scale)
+            .unwrap_or(glam::Vec3::ONE);
+
+        let parent_global = entity
+            .parent()
+            .and_then(|p| p.try_get::<&GlobalTransform>(|g| g.0));
+
+        let global_mat = match parent_global {
+            None => {
+                entity.try_get::<&mut Transform>(|t| {
+                    t.position = pos;
+                    t.rotation = rot;
+                });
+                let g = glam::Mat4::from_scale_rotation_translation(scale, rot, pos);
+                entity.set(GlobalTransform(g));
+                g
+            }
+            Some(parent_mat) => {
+                let world_mat = glam::Mat4::from_scale_rotation_translation(scale, rot, pos);
+                let local_mat = parent_mat.inverse() * world_mat;
+                let (local_scale, local_rot, local_pos) = local_mat.to_scale_rotation_translation();
+
+                entity.try_get::<&mut Transform>(|t| {
+                    t.position = local_pos;
+                    t.rotation = local_rot;
+                    t.scale = local_scale;
+                });
+                entity.set(GlobalTransform(world_mat));
+                world_mat
+            }
+        };
+
+        fn propagate_children(e: flecs_ecs::core::EntityView, p_global: glam::Mat4) {
+            e.each_child(|child| {
+                let child_mat = child
+                    .try_get::<&Transform>(|t| t.compute_matrix())
+                    .unwrap_or(glam::Mat4::IDENTITY);
+                let child_global = p_global * child_mat;
+                child.set(GlobalTransform(child_global));
+                propagate_children(child, child_global);
+            });
+        }
+
+        propagate_children(entity, global_mat);
+    }
+
+    pub fn update_entity_and_children_transforms(&self, entity_id: u64) {
+        let entity = self.inner.entity_from_id(entity_id);
+        if !entity.is_alive() {
+            return;
+        }
+
+        let parent_global = entity
+            .parent()
+            .and_then(|p| p.try_get::<&GlobalTransform>(|g| g.0))
+            .unwrap_or(glam::Mat4::IDENTITY);
+
+        let my_global = if let Some(local_mat) = entity.try_get::<&Transform>(|t| t.compute_matrix()) {
+            let g = parent_global * local_mat;
+            entity.set(GlobalTransform(g));
+            g
+        } else {
+            parent_global
+        };
+
+        fn propagate(e: flecs_ecs::core::EntityView, p_mat: glam::Mat4) {
+            e.each_child(|child| {
+                let mut cur_mat = p_mat;
+                if let Some(l_mat) = child.try_get::<&Transform>(|t| t.compute_matrix()) {
+                    cur_mat = p_mat * l_mat;
+                    child.set(GlobalTransform(cur_mat));
+                }
+                propagate(child, cur_mat);
+            });
+        }
+
+        propagate(entity, my_global);
+    }
 }
 
 pub fn create_world() -> World {
@@ -592,6 +726,7 @@ pub fn create_world() -> World {
     world.component::<ModelComponent>();
     world.component::<RigidBodyComponent>();
     world.component::<ColliderComponent>();
+    world.component::<CharacterControllerComponent>();
     world.component::<Static>();
     world.component::<Dynamic>();
     world.component::<SceneEntity>();
@@ -610,6 +745,17 @@ pub fn spawn_scene(
     asset_id: AssetId,
     baked_model: &BakedModel,
     root_position: Vec3,
+) -> u64 {
+    spawn_scene_with_colliders(world, asset_id, baked_model, root_position, false)
+}
+
+// Расширенная функция с 5 аргументами (для уровней/комнат с генерацией коллизий)
+pub fn spawn_scene_with_colliders(
+    world: &World,
+    asset_id: AssetId,
+    baked_model: &BakedModel,
+    root_position: Vec3,
+    generate_colliders: bool,
 ) -> u64 {
     let model_name = asset_id.path();
     let clean_name = std::path::Path::new(&model_name)
@@ -636,6 +782,7 @@ pub fn spawn_scene(
         node_idx: usize,
         parent: flecs_ecs::core::EntityView<'a>,
         parent_global_matrix: Mat4,
+        generate_colliders: bool,
     ) {
         let node = &baked_model.nodes[node_idx];
 
@@ -670,11 +817,8 @@ pub fn spawn_scene(
                 .map(|m| m.name.as_str())
                 .unwrap_or("Mesh");
 
-            if node.meshes.len() == 1 {
-                node_entity.set(ModelComponent {
-                    id: asset_id,
-                    mesh_index: mesh_idx,
-                });
+            let target_entity = if node.meshes.len() == 1 {
+                node_entity
             } else {
                 let child_mesh_name = format!("{}_{}", mesh_name, i);
                 world
@@ -684,12 +828,22 @@ pub fn spawn_scene(
                     .set(EntityName(child_mesh_name))
                     .set(Transform::default())
                     .set(GlobalTransform(global_matrix))
-                    .set(ModelComponent {
-                        id: asset_id,
-                        mesh_index: mesh_idx,
-                    })
                     .add(SceneEntity)
-                    .add(Static);
+                    .add(Static)
+            };
+
+            target_entity.set(ModelComponent {
+                id: asset_id,
+                mesh_index: mesh_idx,
+            });
+
+            if generate_colliders {
+                target_entity.set(ColliderComponent {
+                    shape_type: ColliderShapeType::TriMesh,
+                    friction: 0.7,
+                    restitution: 0.0,
+                    ..Default::default()
+                });
             }
         }
 
@@ -733,6 +887,7 @@ pub fn spawn_scene(
                 child_idx,
                 node_entity,
                 global_matrix,
+                generate_colliders,
             );
         }
     }
@@ -745,6 +900,7 @@ pub fn spawn_scene(
             root_idx,
             model_root,
             root_matrix,
+            generate_colliders,
         );
     }
 

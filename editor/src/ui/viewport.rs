@@ -454,11 +454,17 @@ pub fn draw_collider_wireframe(
             lines.push((Vec3::new(0.0, h, r), Vec3::new(0.0, -h, r)));
             lines.push((Vec3::new(0.0, h, -r), Vec3::new(0.0, -h, -r)));
         }
+        ecs::ColliderShapeType::TriMesh | ecs::ColliderShapeType::ConvexHull => {}
     }
 
+    let offset_pos = Vec3::from(col.offset_position);
+    let offset_rot = glam::Quat::from_array(col.offset_rotation);
+    let offset_mat = Mat4::from_rotation_translation(offset_rot, offset_pos);
+    let final_model_mat = model_mat * offset_mat;
+
     for (l0, l1) in lines {
-        let p0 = model_mat.transform_point3(l0);
-        let p1 = model_mat.transform_point3(l1);
+        let p0 = final_model_mat.transform_point3(l0);
+        let p1 = final_model_mat.transform_point3(l1);
 
         if let Some((s0, s1)) = project_3d_line(p0, p1, view_proj, viewport_rect) {
             painter.line_segment([s0, s1], stroke);

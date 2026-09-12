@@ -381,21 +381,24 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
         match event {
             WindowEvent::RedrawRequested => {
                 let now = std::time::Instant::now();
-                self.metrics.frame_time_ms =
+                let instant_frame_time =
                     now.duration_since(self.last_frame_time).as_secs_f32() * 1000.0;
                 self.last_frame_time = now;
                 self.frames_this_second += 1;
 
-                let dt = self.metrics.frame_time_ms / 1000.0;
+                // Экспоненциальное сглаживание для UI, чтобы цифры не дрожали от системного шума
+                self.metrics.frame_time_ms = if self.metrics.frame_time_ms == 0.0 {
+                    instant_frame_time
+                } else {
+                    self.metrics.frame_time_ms * 0.9 + instant_frame_time * 0.1
+                };
+
+                let dt = (instant_frame_time / 1000.0).clamp(0.0001, 0.1);
 
                 if now.duration_since(self.last_fps_update).as_secs_f32() >= 1.0 {
                     self.metrics.fps = self.frames_this_second as f32;
                     self.frames_this_second = 0;
                     self.last_fps_update = now;
-                }
-
-                if let Some(window) = &self.window {
-                    window.request_redraw();
                 }
 
                 let mut reloads: Vec<String> = Vec::new();
@@ -428,13 +431,20 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
 
                 match self.play_state {
                     PlayState::Playing => {
-                        let frame_clamped = dt.min(0.25);
+                        let frame_clamped = dt.min(0.05);
                         self.physics_accumulator += frame_clamped;
 
-                        while self.physics_accumulator >= self.fixed_timestep {
+                        let max_substeps = 3;
+                        let mut steps = 0;
+
+                        while self.physics_accumulator >= self.fixed_timestep && steps < max_substeps {
                             self.physics.sync_from_ecs(&self.world);
                             self.physics.step(self.fixed_timestep);
                             self.physics.sync_to_ecs(&self.world);
+
+                            for event in self.physics.collision_events() {
+                                self.game_plugin.on_collision(&self.world, event);
+                            }
 
                             self.game_plugin.on_fixed_update(
                                 &self.world,
@@ -444,6 +454,11 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                             );
 
                             self.physics_accumulator -= self.fixed_timestep;
+                            steps += 1;
+                        }
+
+                        if steps == max_substeps {
+                            self.physics_accumulator = 0.0;
                         }
 
                         self.game_plugin.on_update(
@@ -464,11 +479,14 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                         self.game_input.clear_frame_deltas();
                     }
                     PlayState::Simulating => {
-                        let frame_clamped = dt.min(0.25);
+                        let frame_clamped = dt.min(0.05);
                         self.physics_accumulator += frame_clamped;
 
                         let dummy_input = GameInput::default();
-                        while self.physics_accumulator >= self.fixed_timestep {
+                        let max_substeps = 3;
+                        let mut steps = 0;
+
+                        while self.physics_accumulator >= self.fixed_timestep && steps < max_substeps {
                             self.physics.sync_from_ecs(&self.world);
                             self.physics.step(self.fixed_timestep);
                             self.physics.sync_to_ecs(&self.world);
@@ -481,6 +499,11 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                             );
 
                             self.physics_accumulator -= self.fixed_timestep;
+                            steps += 1;
+                        }
+
+                        if steps == max_substeps {
+                            self.physics_accumulator = 0.0;
                         }
 
                         self.game_plugin.on_update(
@@ -545,6 +568,12 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                     .on_update(&mut self.world, &mut self.camera, &mut self.camera_controller);
 
                 self.world.update_transforms();
+
+                // Интерполяция поз физических тел: вызывается ПОСЛЕ update_transforms и ДО сбора batches
+                let alpha = (self.physics_accumulator / self.fixed_timestep).clamp(0.0, 1.0);
+                if self.play_state == PlayState::Playing || self.play_state == PlayState::Simulating {
+                    self.physics.update_render_transforms(&self.world, alpha);
+                }
 
                 self.camera_controller.update_camera(&mut self.camera, dt);
 
@@ -736,6 +765,36 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                 self.metrics.draw_calls = draw_calls;
 
                 if let Some(renderer) = &mut self.renderer {
+                    if let Some(entity_id) = self.app.selected_entity() {
+                        if let Some(model_mat) = self.world.get_global_transform(entity_id) {
+                            let mut need_update = true;
+                            
+                            if let Some(ref current) = renderer.selected_outline {
+                                if current.model_matrix == model_mat {
+                                    need_update = false;
+                                }
+                            }
+
+                            if need_update {
+                                self.world.get_model(entity_id, |model| {
+                                    if let Some(asset_model) = self.asset_server.get::<render::model::Model>(model.id) {
+                                        renderer.set_selected_outline(
+                                            asset_model.clone(),
+                                            model.mesh_index,
+                                            model_mat,
+                                        );
+                                    }
+                                });
+                            }
+                        } else {
+                            renderer.clear_selected_outline();
+                        }
+                    } else if renderer.selected_outline.is_some() {
+                        renderer.clear_selected_outline();
+                    }
+                }
+
+                if let Some(renderer) = &mut self.renderer {
                     if let Err(e) = renderer.render_batches(
                         &camera_uniform,
                         &render_data,
@@ -747,6 +806,7 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                     }
                 }
 
+                // Запрос перерисовки вызывается строго один раз в самом конце
                 if let Some(window) = &self.window {
                     window.request_redraw();
                 }

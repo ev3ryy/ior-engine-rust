@@ -147,6 +147,8 @@ pub enum ColliderShapeType {
     Sphere,
     Capsule,
     Cylinder,
+    TriMesh,
+    ConvexHull,
 }
 
 impl Default for ColliderShapeType {
@@ -160,18 +162,34 @@ pub struct ColliderComponent {
     #[serde(default)]
     pub shape_type: ColliderShapeType,
     #[serde(default = "default_collider_size")]
-    pub size: [f32; 3], // half-extents для Cuboid, x = radius для Sphere, [x=radius, y=half_height] для Capsule/Cylinder
+    pub size: [f32; 3],
     #[serde(default = "default_friction")]
     pub friction: f32,
     #[serde(default = "default_restitution")]
     pub restitution: f32,
     #[serde(default)]
     pub is_sensor: bool,
+
+    #[serde(default = "default_vec3_zero")]
+    pub offset_position: [f32; 3],
+    #[serde(default = "default_quat_identity")]
+    pub offset_rotation: [f32; 4], // [x, y, z, w]
+
+    #[serde(default = "default_u32_max")]
+    pub collision_memberships: u32,
+    #[serde(default = "default_u32_max")]
+    pub collision_filters: u32,
+
+    #[serde(default = "default_true")]
+    pub generate_collision_events: bool,
 }
 
 fn default_collider_size() -> [f32; 3] { [0.5, 0.5, 0.5] }
 fn default_friction() -> f32 { 0.5 }
 fn default_restitution() -> f32 { 0.0 }
+fn default_vec3_zero() -> [f32; 3] { [0.0, 0.0, 0.0] }
+fn default_quat_identity() -> [f32; 4] { [0.0, 0.0, 0.0, 1.0] }
+fn default_u32_max() -> u32 { u32::MAX }
 
 impl Default for ColliderComponent {
     fn default() -> Self {
@@ -181,6 +199,52 @@ impl Default for ColliderComponent {
             friction: default_friction(),
             restitution: default_restitution(),
             is_sensor: false,
+            offset_position: default_vec3_zero(),
+            offset_rotation: default_quat_identity(),
+            collision_memberships: default_u32_max(),
+            collision_filters: default_u32_max(),
+            generate_collision_events: true,
+        }
+    }
+}
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct CharacterControllerComponent {
+    #[serde(default = "default_autostep_height")]
+    pub autostep_max_height: f32,
+    #[serde(default = "default_autostep_width")]
+    pub autostep_min_width: f32,
+    #[serde(default = "default_max_slope")]
+    pub max_slope_climb_angle: f32,
+    #[serde(default = "default_min_slide")]
+    pub min_slope_slide_angle: f32,
+    #[serde(default = "default_snap_distance")]
+    pub snap_to_ground_distance: f32,
+    #[serde(default = "default_true")]
+    pub enable_autostep: bool,
+    #[serde(default = "default_true")]
+    pub enable_snap_to_ground: bool,
+    #[serde(default = "default_true")]
+    pub slide: bool,
+}
+
+fn default_autostep_height() -> f32 { 0.35 }
+fn default_autostep_width() -> f32 { 0.2 }
+fn default_max_slope() -> f32 { 45.0 }
+fn default_min_slide() -> f32 { 45.0 }
+fn default_snap_distance() -> f32 { 0.25 }
+
+impl Default for CharacterControllerComponent {
+    fn default() -> Self {
+        Self {
+            autostep_max_height: default_autostep_height(),
+            autostep_min_width: default_autostep_width(),
+            max_slope_climb_angle: default_max_slope(),
+            min_slope_slide_angle: default_min_slide(),
+            snap_to_ground_distance: default_snap_distance(),
+            enable_autostep: true,
+            enable_snap_to_ground: true,
+            slide: true,
         }
     }
 }

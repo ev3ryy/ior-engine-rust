@@ -57,4 +57,8 @@ pub trait Application {
     }
 
     fn on_resize(&mut self, _width: u32, _height: u32) {}
+
+    fn selected_entity(&self) -> Option<u64> {
+        None
+    }
 }

@@ -46,6 +46,7 @@ pub struct FolderTree {
 pub struct AssetBrowserState {
     pub root_dir: PathBuf,
     pub current_dir: PathBuf,
+    pub folder_panel_width: f32,
     pub selected_file: Option<PathBuf>,
     pub search_query: String,
     pub category_filter: AssetCategoryFilter,
@@ -73,6 +74,7 @@ impl Default for AssetBrowserState {
         Self {
             root_dir: root.clone(),
             current_dir: root,
+            folder_panel_width: 180.0,
             selected_file: None,
             search_query: String::new(),
             category_filter: AssetCategoryFilter::All,
@@ -161,8 +163,11 @@ pub fn draw_asset_browser(ui: &mut Ui, ctx: &mut EditorContext) {
     ui.with_layout(
         egui::Layout::left_to_right(egui::Align::TOP).with_cross_justify(true),
         |ui| {
+            let folder_w = ctx.asset_browser_state.folder_panel_width;
+
+            // ПАНЕЛЬ ПАПОК
             ui.allocate_ui_with_layout(
-                Vec2::new(180.0, available_h),
+                Vec2::new(folder_w, available_h), // <-- ВАЖНО: здесь должен быть folder_w, а не 180.0!
                 egui::Layout::top_down(egui::Align::LEFT),
                 |ui| {
                     ui.set_min_height(available_h);
@@ -180,8 +185,50 @@ pub fn draw_asset_browser(ui: &mut Ui, ctx: &mut EditorContext) {
                 },
             );
 
-            ui.separator();
+            // 2. ПОДВИЖНЫЙ РАЗДЕЛИТЕЛЬ
+            // Выделяем область потолще (8px) под захват мышью
+            let (sep_rect, _) = ui.allocate_exact_size(
+                Vec2::new(8.0, available_h),
+                Sense::hover(),
+            );
 
+            // Задаем фиксированный ID и чистый Sense::drag() для мгновенного отклика
+            let sep_resp = ui.interact(
+                sep_rect,
+                ui.id().with("folders_splitter"),
+                Sense::drag(),
+            );
+
+            if sep_resp.dragged() {
+                let delta = sep_resp.drag_delta().x;
+                // Не даем схлопнуть правую часть: оставляем минимум 200px под файлы
+                let max_w = (ui.max_rect().width() - 200.0).max(120.0);
+                ctx.asset_browser_state.folder_panel_width =
+                    (ctx.asset_browser_state.folder_panel_width + delta).clamp(100.0, max_w);
+                
+                // Запрашиваем перерисовку кадра при перетаскивании
+                ui.ctx().request_repaint();
+            }
+
+            if sep_resp.hovered() || sep_resp.dragged() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+            }
+
+            // Отрисовка тонкой линии ровно по центру 8-пиксельной хитбокс-зоны
+            let line_color = if sep_resp.dragged() {
+                ui.visuals().widgets.active.bg_fill
+            } else if sep_resp.hovered() {
+                ui.visuals().widgets.hovered.bg_fill
+            } else {
+                ui.visuals().widgets.noninteractive.bg_stroke.color
+            };
+            ui.painter().vline(
+                sep_rect.center().x,
+                sep_rect.y_range(),
+                egui::Stroke::new(1.0, line_color),
+            );
+
+            // 3. ОБЛАСТЬ ФАЙЛОВ
             let available_w = ui.available_width() - if show_preview { 220.0 } else { 0.0 };
             ui.allocate_ui_with_layout(
                 Vec2::new(available_w.max(200.0), available_h),
@@ -441,7 +488,7 @@ fn draw_file_view(ui: &mut Ui, ctx: &mut EditorContext) {
                 });
 
                 let remaining_size = ui.available_size();
-                let (bg_rect, bg_resp) = ui.allocate_exact_size(
+                let (_bg_rect, bg_resp) = ui.allocate_exact_size(
                     Vec2::new(ui.available_width(), remaining_size.y.max(60.0)),
                     Sense::click(),
                 );
@@ -870,57 +917,57 @@ fn draw_file_list_item(ui: &mut Ui, entry: &CachedDirEntry, ctx: &mut EditorCont
     });
 }
 
-fn handle_file_interactions(resp: &egui::Response, entry: &CachedDirEntry, ctx: &mut EditorContext) {
-    if resp.clicked() {
-        ctx.asset_browser_state.selected_file = Some(entry.path.clone());
-        ctx.asset_browser_state.selected_file_size_kb = fs::metadata(&entry.path).ok().map(|m| m.len() as f32 / 1024.0);
+// fn handle_file_interactions(resp: &egui::Response, entry: &CachedDirEntry, ctx: &mut EditorContext) {
+//     if resp.clicked() {
+//         ctx.asset_browser_state.selected_file = Some(entry.path.clone());
+//         ctx.asset_browser_state.selected_file_size_kb = fs::metadata(&entry.path).ok().map(|m| m.len() as f32 / 1024.0);
         
-        if entry.ext == "bin" {
-            ctx.asset_browser_state.cached_model_info = read_model_info(&entry.path);
-        } else {
-            ctx.asset_browser_state.cached_model_info = None;
-        }
-    }
+//         if entry.ext == "bin" {
+//             ctx.asset_browser_state.cached_model_info = read_model_info(&entry.path);
+//         } else {
+//             ctx.asset_browser_state.cached_model_info = None;
+//         }
+//     }
 
-    if resp.drag_started() && entry.ext == "bin" {
-        ctx.asset_browser_state.dragged_asset = Some(entry.path.clone());
-    }
+//     if resp.drag_started() && entry.ext == "bin" {
+//         ctx.asset_browser_state.dragged_asset = Some(entry.path.clone());
+//     }
 
-    if resp.double_clicked() && entry.ext == "bin" {
-        spawn_model_in_scene(&entry.path, ctx);
-    }
+//     if resp.double_clicked() && entry.ext == "bin" {
+//         spawn_model_in_scene(&entry.path, ctx);
+//     }
 
-    resp.context_menu(|ui| {
-        if entry.ext == "bin" {
-            if ui.button("➕ Spawn in Scene").clicked() {
-                spawn_model_in_scene(&entry.path, ctx);
-                ui.close();
-            }
-        }
+//     resp.context_menu(|ui| {
+//         if entry.ext == "bin" {
+//             if ui.button("➕ Spawn in Scene").clicked() {
+//                 spawn_model_in_scene(&entry.path, ctx);
+//                 ui.close();
+//             }
+//         }
 
-        if entry.ext == "glb" || entry.ext == "gltf" {
-            if ui.button("🔥 Cook to .bin").clicked() {
-                let cooking_tasks = ctx.asset_browser_state.cooking_assets.clone();
-                cook_asset(&entry.path, cooking_tasks);
-                ui.close();
-            }
-        }
+//         if entry.ext == "glb" || entry.ext == "gltf" {
+//             if ui.button("🔥 Cook to .bin").clicked() {
+//                 let cooking_tasks = ctx.asset_browser_state.cooking_assets.clone();
+//                 cook_asset(&entry.path, cooking_tasks);
+//                 ui.close();
+//             }
+//         }
 
-        if ui.button("📂 Show in Explorer").clicked() {
-            reveal_in_explorer(&entry.path);
-            ui.close();
-        }
+//         if ui.button("📂 Show in Explorer").clicked() {
+//             reveal_in_explorer(&entry.path);
+//             ui.close();
+//         }
 
-        ui.separator();
-        if ui.button(RichText::new("🗑 Delete").color(Color32::RED)).clicked() {
-            let _ = fs::remove_file(&entry.path);
-            ctx.asset_browser_state.needs_refresh = true;
-            ctx.asset_browser_state.selected_file = None;
-            ctx.asset_browser_state.cached_model_info = None;
-            ui.close();
-        }
-    });
-}
+//         ui.separator();
+//         if ui.button(RichText::new("🗑 Delete").color(Color32::RED)).clicked() {
+//             let _ = fs::remove_file(&entry.path);
+//             ctx.asset_browser_state.needs_refresh = true;
+//             ctx.asset_browser_state.selected_file = None;
+//             ctx.asset_browser_state.cached_model_info = None;
+//             ui.close();
+//         }
+//     });
+// }
 
 fn draw_asset_preview_drawer(ui: &mut Ui, ctx: &mut EditorContext) {
     let selected_path = match ctx.asset_browser_state.selected_file.clone() {

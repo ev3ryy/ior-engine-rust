@@ -295,4 +295,8 @@ impl Application for Editor {
 
         play_action
     }
+
+    fn selected_entity(&self) -> Option<u64> {
+        self.selected_entity
+    }
 }

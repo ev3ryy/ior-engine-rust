@@ -1,6 +1,6 @@
 use super::{
     reflection::{RonDeserializer, RonSerializer},
-    CameraComponent, Dynamic, EntityName, GlobalTransform, LightComponent, ModelComponent, RigidBodyComponent, ColliderComponent,
+    CameraComponent, Dynamic, EntityName, GlobalTransform, LightComponent, ModelComponent, RigidBodyComponent, ColliderComponent, CharacterControllerComponent,
     SceneEntity, Static, Transform, World,
 };
 use flecs_ecs::prelude::*;
@@ -68,6 +68,9 @@ pub struct EntityRecord {
     pub rigid_body: Option<RigidBodyComponent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collider: Option<ColliderComponent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub character_controller: Option<CharacterControllerComponent>,
+
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub components: BTreeMap<String, BTreeMap<String, ron::Value>>,
     #[serde(default)]
@@ -130,6 +133,7 @@ pub fn create_world_snapshot(world: &World) -> anyhow::Result<Vec<u8>> {
 
         let rigid_body = entity.try_get::<&RigidBodyComponent>(|r| *r);
         let collider = entity.try_get::<&ColliderComponent>(|c| *c);
+        let character_controller = entity.try_get::<&CharacterControllerComponent>(|k| *k);
 
         records.push(EntityRecord {
             name,
@@ -140,6 +144,7 @@ pub fn create_world_snapshot(world: &World) -> anyhow::Result<Vec<u8>> {
             light,
             rigid_body,
             collider,
+            character_controller,
             components: custom_components,
             is_static,
             is_dynamic,
@@ -206,6 +211,10 @@ pub fn restore_world_snapshot(world: &mut World, bytes: &[u8]) -> anyhow::Result
 
         if let Some(col) = record.collider {
             entity.set(col);
+        }
+
+        if let Some(kcc) = record.character_controller {
+            entity.set(kcc);
         }
 
         for (comp_name, comp_fields) in &record.components {

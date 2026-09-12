@@ -1,6 +1,6 @@
 use crate::ui::visitor::EguiFieldVisitor;
 use crate::ui::EditorContext;
-use ecs::{CameraComponent, ColliderComponent, LightComponent, LightType, RigidBodyComponent, Transform};
+use ecs::{CameraComponent, ColliderComponent, ColliderShapeType, LightComponent, LightType, RigidBodyComponent, Transform};
 use egui::{Color32, DragValue, RichText, ScrollArea, Slider, Ui};
 
 pub fn draw_inspector(ui: &mut Ui, ctx: &mut EditorContext) {
@@ -289,7 +289,7 @@ pub fn draw_inspector(ui: &mut Ui, ctx: &mut EditorContext) {
                 ui.add_space(5.0);
             }
 
-            // collider component
+            // collider component (обновлен под Спринт 2)
             if has_collider {
                 ui.group(|ui| {
                     ui.horizontal(|ui| {
@@ -304,20 +304,24 @@ pub fn draw_inspector(ui: &mut Ui, ctx: &mut EditorContext) {
                     ctx.world.get_collider_mut(entity_id, |col| {
                         egui::ComboBox::from_label("Shape")
                             .selected_text(match col.shape_type {
-                                ecs::ColliderShapeType::Cuboid => "Cuboid (Box)",
-                                ecs::ColliderShapeType::Sphere => "Sphere",
-                                ecs::ColliderShapeType::Capsule => "Capsule",
-                                ecs::ColliderShapeType::Cylinder => "Cylinder",
+                                ColliderShapeType::Cuboid => "Cuboid (Box)",
+                                ColliderShapeType::Sphere => "Sphere",
+                                ColliderShapeType::Capsule => "Capsule",
+                                ColliderShapeType::Cylinder => "Cylinder",
+                                ColliderShapeType::TriMesh => "TriMesh (Model)",
+                                ColliderShapeType::ConvexHull => "Convex Hull (Model)",
                             })
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut col.shape_type, ecs::ColliderShapeType::Cuboid, "Cuboid (Box)");
-                                ui.selectable_value(&mut col.shape_type, ecs::ColliderShapeType::Sphere, "Sphere");
-                                ui.selectable_value(&mut col.shape_type, ecs::ColliderShapeType::Capsule, "Capsule");
-                                ui.selectable_value(&mut col.shape_type, ecs::ColliderShapeType::Cylinder, "Cylinder");
+                                ui.selectable_value(&mut col.shape_type, ColliderShapeType::Cuboid, "Cuboid (Box)");
+                                ui.selectable_value(&mut col.shape_type, ColliderShapeType::Sphere, "Sphere");
+                                ui.selectable_value(&mut col.shape_type, ColliderShapeType::Capsule, "Capsule");
+                                ui.selectable_value(&mut col.shape_type, ColliderShapeType::Cylinder, "Cylinder");
+                                ui.selectable_value(&mut col.shape_type, ColliderShapeType::TriMesh, "TriMesh (Model)");
+                                ui.selectable_value(&mut col.shape_type, ColliderShapeType::ConvexHull, "Convex Hull (Model)");
                             });
 
                         match col.shape_type {
-                            ecs::ColliderShapeType::Cuboid => {
+                            ColliderShapeType::Cuboid => {
                                 ui.horizontal(|ui| {
                                     ui.label("Half Extents:");
                                     ui.add(DragValue::new(&mut col.size[0]).speed(0.05).prefix("X: "));
@@ -325,14 +329,35 @@ pub fn draw_inspector(ui: &mut Ui, ctx: &mut EditorContext) {
                                     ui.add(DragValue::new(&mut col.size[2]).speed(0.05).prefix("Z: "));
                                 });
                             }
-                            ecs::ColliderShapeType::Sphere => {
+                            ColliderShapeType::Sphere => {
                                 ui.add(DragValue::new(&mut col.size[0]).speed(0.05).prefix("Radius: "));
                             }
-                            ecs::ColliderShapeType::Capsule | ecs::ColliderShapeType::Cylinder => {
+                            ColliderShapeType::Capsule | ColliderShapeType::Cylinder => {
                                 ui.add(DragValue::new(&mut col.size[0]).speed(0.05).prefix("Radius: "));
                                 ui.add(DragValue::new(&mut col.size[1]).speed(0.05).prefix("Half Height: "));
                             }
+                            ColliderShapeType::TriMesh => {
+                                ui.label(RichText::new("ℹ Uses mesh vertices from MeshComponent (Static)").weak());
+                            }
+                            ColliderShapeType::ConvexHull => {
+                                ui.label(RichText::new("ℹ Computes convex hull from MeshComponent").weak());
+                            }
                         }
+
+                        ui.collapsing("📐 Local Offset", |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label("Pos:");
+                                ui.add(DragValue::new(&mut col.offset_position[0]).speed(0.05).prefix("X: "));
+                                ui.add(DragValue::new(&mut col.offset_position[1]).speed(0.05).prefix("Y: "));
+                                ui.add(DragValue::new(&mut col.offset_position[2]).speed(0.05).prefix("Z: "));
+                            });
+                        });
+
+                        ui.collapsing("🏷 Collision Filtering", |ui| {
+                            ui.add(DragValue::new(&mut col.collision_memberships).prefix("Memberships: "));
+                            ui.add(DragValue::new(&mut col.collision_filters).prefix("Filters: "));
+                            ui.checkbox(&mut col.generate_collision_events, "Generate Collision Events");
+                        });
 
                         ui.add(Slider::new(&mut col.friction, 0.0..=2.0).text("Friction"));
                         ui.add(Slider::new(&mut col.restitution, 0.0..=1.0).text("Restitution (Bounciness)"));
