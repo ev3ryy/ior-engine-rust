@@ -5,8 +5,6 @@ rustc-ice-*.txt
 /res/
 /gltf/
 
-/game/
-
 /perf.data
 /perf.data.old
 **/target/criterion/
