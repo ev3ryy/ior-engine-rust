@@ -150,7 +150,9 @@ impl Application for Editor {
                             let target_path = scene_manager
                                 .current_scene_path
                                 .clone()
-                                .unwrap_or_else(|| std::path::PathBuf::from(&self.config.world_save_path));
+                                .unwrap_or_else(|| {
+                                    asset::resolve_asset_root().join("scenes").join("NewScene.scene")
+                                });
 
                             if let Some(parent) = target_path.parent() {
                                 let _ = std::fs::create_dir_all(parent);
@@ -166,6 +168,7 @@ impl Application for Editor {
 
                                 self.config.world_save_path = path_str.to_string();
                                 self.config.save("editor.cfg");
+                                self.asset_browser_state.needs_refresh = true;
                             }
                             TabKind::save_dock_state(&self.dock_state);
                             return true;

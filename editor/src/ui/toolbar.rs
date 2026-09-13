@@ -93,7 +93,9 @@ pub fn draw_toolbar(
                     if ui.button(format!("💾 Save Scene ({}) (F5)", scene_name)).clicked() {
                         let target_path = editor_ctx.scene_manager.current_scene_path
                             .clone()
-                            .unwrap_or_else(|| std::path::PathBuf::from("res/scenes/NewScene.scene"));
+                            .unwrap_or_else(|| {
+                                asset::resolve_asset_root().join("scenes").join("NewScene.scene")
+                            });
 
                         if let Some(parent) = target_path.parent() {
                             let _ = std::fs::create_dir_all(parent);
@@ -106,6 +108,7 @@ pub fn draw_toolbar(
                             log::info!("Scene successfully saved to {path_str}");
                             editor_ctx.scene_manager.current_scene_path = Some(target_path);
                             editor_ctx.scene_manager.is_dirty = false;
+                            editor_ctx.asset_browser_state.needs_refresh = true;
                         }
                         TabKind::save_dock_state(dock_state);
                         ui.close();
