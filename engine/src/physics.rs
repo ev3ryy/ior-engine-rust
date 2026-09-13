@@ -1,7 +1,6 @@
-use ecs::flecs_ecs::prelude::*;
 use ecs::{
     BodyType, CharacterControllerComponent, ColliderComponent, ColliderShapeType,
-    GlobalTransform, ModelComponent, RigidBodyComponent, Transform, World,
+    ModelComponent, World,
 };
 use rapier3d::control::{
     CharacterAutostep, CharacterLength, KinematicCharacterController,
@@ -706,14 +705,14 @@ impl PhysicsWorld {
         self.active_bodies_scratch.clear();
         self.active_colliders_scratch.clear();
 
-        world.inner.each_entity::<&RigidBodyComponent>(|entity, rb_comp| {
-            let entity_id = *entity.id();
+        world.each_rigid_body(|entity, rb_comp, global, transform| {
+            let entity_id = entity.0;
             self.active_bodies_scratch.insert(entity_id);
 
-            let (world_pos, world_rot, _) = if let Some(global) = entity.try_get::<&GlobalTransform>(|g| g.0) {
-                let (_, r, p) = global.to_scale_rotation_translation();
+            let (world_pos, world_rot, _) = if let Some(g) = global {
+                let (_, r, p) = g.0.to_scale_rotation_translation();
                 (p, r, glam::Vec3::ONE)
-            } else if let Some(t) = entity.try_get::<&Transform>(|t| *t) {
+            } else if let Some(t) = transform {
                 (t.position, t.rotation, t.scale)
             } else {
                 (glam::Vec3::ZERO, glam::Quat::IDENTITY, glam::Vec3::ONE)
@@ -763,14 +762,14 @@ impl PhysicsWorld {
             }
         });
 
-        world.inner.each_entity::<&ColliderComponent>(|entity, col_comp| {
-            let entity_id = *entity.id();
+        world.each_collider(|entity, col_comp, global, transform, model_comp| {
+            let entity_id = entity.0;
             self.active_colliders_scratch.insert(entity_id);
 
-            let (world_pos, world_rot, scale) = if let Some(global) = entity.try_get::<&GlobalTransform>(|g| g.0) {
-                let (s, r, p) = global.to_scale_rotation_translation();
+            let (world_pos, world_rot, scale) = if let Some(g) = global {
+                let (s, r, p) = g.0.to_scale_rotation_translation();
                 (p, r, s)
-            } else if let Some(t) = entity.try_get::<&Transform>(|t| *t) {
+            } else if let Some(t) = transform {
                 (t.position, t.rotation, t.scale)
             } else {
                 (glam::Vec3::ZERO, glam::Quat::IDENTITY, glam::Vec3::ONE)
@@ -824,12 +823,11 @@ impl PhysicsWorld {
                     }
 
                     if self.collider_shape_cache.get(&entity_id) != Some(&shape_signature) {
-                        let model_comp = entity.try_get::<&ModelComponent>(|m| m.clone());
                         let new_shape = Self::build_shape_from_cache(
                             &self.mesh_cache,
                             col_comp,
                             scale,
-                            model_comp.as_ref(),
+                            model_comp,
                         );
                         collider.set_shape(new_shape);
                         self.collider_shape_cache.insert(entity_id, shape_signature);
@@ -852,12 +850,11 @@ impl PhysicsWorld {
                 }
             }
 
-            let model_comp = entity.try_get::<&ModelComponent>(|m| m.clone());
             let shape = Self::build_shape_from_cache(
                 &self.mesh_cache,
                 col_comp,
                 scale,
-                model_comp.as_ref(),
+                model_comp,
             );
 
             let mut col_builder = ColliderBuilder::new(shape)

@@ -79,7 +79,7 @@ pub fn draw_viewport(ui: &mut egui::Ui, ctx: &mut EditorContext) {
                                             &baked_model,
                                             spawn_pos,
                                         );
-                                        *ctx.selected_entity = Some(spawned_id);
+                                        *ctx.selected_entity = Some(spawned_id.0);
                                         ctx.load_requests.push(file_name.to_string());
                                         log::info!("Spawned model {:?} at {}", file_name, spawn_pos);
                                     }
@@ -92,7 +92,7 @@ pub fn draw_viewport(ui: &mut egui::Ui, ctx: &mut EditorContext) {
                                 glam::Quat::IDENTITY,
                             ) {
                                 Ok(spawned_id) => {
-                                    *ctx.selected_entity = Some(spawned_id);
+                                    *ctx.selected_entity = Some(spawned_id.0);
                                     log::info!("Spawned prefab {:?} at {}", dragged_path, spawn_pos);
                                 }
                                 Err(e) => {
@@ -244,7 +244,7 @@ pub fn pick_entity(
 
                 if let Some(t) = ray.intersect_obb(aabb_min, aabb_max, global.0) {
                     if t > 0.0 && closest_hit.map_or(true, |(_, min_t)| t < min_t) {
-                        closest_hit = Some((entity_id, t));
+                        closest_hit = Some((entity_id.0, t));
                     }
                 }
             }
@@ -255,7 +255,7 @@ pub fn pick_entity(
         let center = global.translation();
         if let Some(t) = ray.intersect_sphere(center, 0.5) {
             if t > 0.0 && closest_hit.map_or(true, |(_, min_t)| t < min_t) {
-                closest_hit = Some((entity_id, t));
+                closest_hit = Some((entity_id.0, t));
             }
         }
     });
@@ -264,7 +264,7 @@ pub fn pick_entity(
         let center = global.translation();
         if let Some(t) = ray.intersect_sphere(center, 0.5) {
             if t > 0.0 && closest_hit.map_or(true, |(_, min_t)| t < min_t) {
-                closest_hit = Some((entity_id, t));
+                closest_hit = Some((entity_id.0, t));
             }
         }
     });

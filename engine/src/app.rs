@@ -25,6 +25,7 @@ pub trait Application {
         world: &mut World,
         camera: &mut Camera,
         camera_controller: &mut CameraController,
+        scene_manager: &mut crate::scene::SceneManager,
         event: &WindowEvent,
     ) -> bool;
 
@@ -38,6 +39,7 @@ pub trait Application {
         load_requests: &mut Vec<String>,
         play_state: PlayState,
         asset_server: &Arc<asset::AssetServer>,
+        scene_manager: &mut crate::scene::SceneManager,
         viewport_texture_id: Option<egui::TextureId>,
         desired_viewport_size: &mut Option<(u32, u32)>,
     ) -> PlayControlAction {
@@ -50,6 +52,7 @@ pub trait Application {
             load_requests,
             play_state,
             asset_server,
+            scene_manager,
             viewport_texture_id,
             desired_viewport_size,
         );

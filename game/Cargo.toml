@@ -7,5 +7,6 @@ edition = "2024"
 [dependencies]
 ecs = { path = "../ecs" }
 engine = { path = "../engine" }
+serde = { version = "1.0", features = ["derive"] }
 glam = "0.33.6"
 log = "0.4"

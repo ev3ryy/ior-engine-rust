@@ -5,7 +5,7 @@ pub use engine::game::PlayControlAction;
 pub use settings::EditorConfig;
 pub use ui::asset_browser::AssetBrowserState;
 
-use ecs::serialization::{load_world, save_world};
+use ecs::serialization::{save_world};
 use ecs::World;
 use engine::app::Application;
 use engine::camera::{Camera, CameraController, CameraMovement};
@@ -88,6 +88,7 @@ impl Application for Editor {
         world: &mut World,
         _camera: &mut Camera,
         camera_controller: &mut CameraController,
+        scene_manager: &mut engine::scene::SceneManager,
         event: &WindowEvent,
     ) -> bool {
         if self.play_state == PlayState::Playing {
@@ -146,26 +147,42 @@ impl Application for Editor {
                             return true;
                         }
                         PhysicalKey::Code(KeyCode::F5) => {
-                            if let Err(e) = save_world(world, &self.config.world_save_path) {
-                                log::error!("Failed to save world: {}", e);
-                            } else {
-                                log::info!("World saved to {}", self.config.world_save_path);
+                            let target_path = scene_manager
+                                .current_scene_path
+                                .clone()
+                                .unwrap_or_else(|| std::path::PathBuf::from(&self.config.world_save_path));
+
+                            if let Some(parent) = target_path.parent() {
+                                let _ = std::fs::create_dir_all(parent);
                             }
-                            self.config.save("editor.cfg");
+
+                            let path_str = target_path.to_string_lossy();
+                            if let Err(e) = save_world(world, &path_str) {
+                                log::error!("Failed to save scene: {}", e);
+                            } else {
+                                log::info!("Scene successfully saved to {}", path_str);
+                                scene_manager.current_scene_path = Some(target_path.clone());
+                                scene_manager.is_dirty = false;
+
+                                self.config.world_save_path = path_str.to_string();
+                                self.config.save("editor.cfg");
+                            }
                             TabKind::save_dock_state(&self.dock_state);
                             return true;
                         }
+
                         PhysicalKey::Code(KeyCode::F9) => {
                             self.selected_entity = None;
-                            if let Err(e) = load_world(world, &self.config.world_save_path) {
-                                log::error!("Failed to load world: {}", e);
+                            let path_to_load = scene_manager
+                                .current_scene_path
+                                .clone()
+                                .unwrap_or_else(|| std::path::PathBuf::from(&self.config.world_save_path));
+
+                            if path_to_load.exists() {
+                                scene_manager.queue_load(path_to_load);
                             } else {
-                                log::info!("World loaded from {}", self.config.world_save_path);
-                                world.each_model(|_, model_comp| {
-                                    self.models_to_load.push(model_comp.id.path());
-                                });
+                                log::warn!("Scene file {:?} does not exist to reload.", path_to_load);
                             }
-                            self.config = EditorConfig::load("editor.cfg");
                             return true;
                         }
                         _ => {}
@@ -259,6 +276,7 @@ impl Application for Editor {
         load_requests: &mut Vec<String>,
         play_state: engine::game::PlayState,
         asset_server: &std::sync::Arc<asset::AssetServer>,
+        scene_manager: &mut engine::scene::SceneManager,
         viewport_texture_id: Option<egui::TextureId>,
         desired_viewport_size: &mut Option<(u32, u32)>,
     ) -> engine::game::PlayControlAction {
@@ -284,8 +302,8 @@ impl Application for Editor {
             play_state,
             &mut play_action,
             asset_server,
+            scene_manager,
             &mut self.dock_state,
-            &self.config.world_save_path,
             viewport_texture_id,
             desired_viewport_size,
             &mut self.asset_browser_state,

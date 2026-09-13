@@ -14,7 +14,7 @@ fn main() -> anyhow::Result<()> {
         msaa_samples: 1,
     };
 
-    let game_plugin = Box::new(MyGamePlugin::default());
+    let game_plugin = Box::new(MyGamePlugin);
     let editor_app = Editor::new(editor_config);
 
     run(engine_config, editor_app, game_plugin)

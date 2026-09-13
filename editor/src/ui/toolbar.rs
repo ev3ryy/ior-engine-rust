@@ -84,29 +84,42 @@ pub fn draw_toolbar(
 
                 // file menu
                 ui.menu_button("File", |ui| {
-                    if ui.button("Save Scene (F5)").clicked() {
-                        if let Err(e) = save_world(editor_ctx.world, editor_ctx.world_save_path) {
+                    if ui.button("📄 New Scene").clicked() {
+                        editor_ctx.scene_manager.queue_new();
+                        *editor_ctx.selected_entity = None;
+                        ui.close();
+                    }
+
+                    let scene_name = editor_ctx.scene_manager.current_scene_name();
+                    if ui.button(format!("💾 Save Scene ({}) (F5)", scene_name)).clicked() {
+                        let target_path = editor_ctx.scene_manager.current_scene_path
+                            .clone()
+                            .unwrap_or_else(|| std::path::PathBuf::from("res/scenes/NewScene.scene"));
+
+                        if let Some(parent) = target_path.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+
+                        let path_str = target_path.to_string_lossy();
+                        if let Err(e) = ecs::serialization::save_world(editor_ctx.world, &path_str) {
                             log::error!("Failed to save scene: {e}");
                         } else {
-                            log::info!("Scene saved to {}", editor_ctx.world_save_path);
+                            log::info!("Scene successfully saved to {path_str}");
+                            editor_ctx.scene_manager.current_scene_path = Some(target_path);
+                            editor_ctx.scene_manager.is_dirty = false;
                         }
                         TabKind::save_dock_state(dock_state);
                         ui.close();
                     }
-                    if ui.button("Load Scene (F9)").clicked() {
-                        *editor_ctx.selected_entity = None;
-                        if let Err(e) = load_world(editor_ctx.world, editor_ctx.world_save_path) {
-                            log::error!("Failed to load scene: {e}");
-                        } else {
-                            log::info!("Scene loaded from {}", editor_ctx.world_save_path);
+
+                    if ui.button("↻ Reload Current Scene (F9)").clicked() {
+                        if let Some(path) = editor_ctx.scene_manager.current_scene_path.clone() {
+                            editor_ctx.scene_manager.queue_load(path);
+                            *editor_ctx.selected_entity = None;
                         }
                         ui.close();
                     }
-                    ui.separator();
-                    if ui.button("Clear Scene").clicked() {
-                        editor_ctx.clear_requested = true;
-                        ui.close();
-                    }
+
                     ui.separator();
                     if ui.button("Quit").clicked() {
                         TabKind::save_dock_state(dock_state);
@@ -118,7 +131,7 @@ pub fn draw_toolbar(
                 ui.menu_button("➕ Spawn", |ui| {
                     if ui.button("Empty Entity").clicked() {
                         let id = editor_ctx.world.spawn_empty("Empty Entity");
-                        *editor_ctx.selected_entity = Some(id);
+                        *editor_ctx.selected_entity = Some(id.0); // <- id.0
                         ui.close();
                     }
                     if ui.button("📷 Camera").clicked() {
@@ -130,7 +143,7 @@ pub fn draw_toolbar(
                         editor_ctx
                             .world
                             .add_camera(id, CameraComponent::default());
-                        *editor_ctx.selected_entity = Some(id);
+                        *editor_ctx.selected_entity = Some(id.0); // <- id.0
                         ui.close();
                     }
                     if ui.button("💡 Point Light").clicked() {
@@ -152,7 +165,7 @@ pub fn draw_toolbar(
                                 outer_angle: 0.0,
                             },
                         );
-                        *editor_ctx.selected_entity = Some(id);
+                        *editor_ctx.selected_entity = Some(id.0); // <- id.0
                         ui.close();
                     }
                     if ui.button("☀️ Directional Light").clicked() {
@@ -178,10 +191,12 @@ pub fn draw_toolbar(
                                 outer_angle: 0.0,
                             },
                         );
-                        *editor_ctx.selected_entity = Some(id);
+                        *editor_ctx.selected_entity = Some(id.0); // <- id.0
                         ui.close();
                     }
                 });
+
+                ui.label(RichText::new(format!("🎬 {}", editor_ctx.scene_manager.current_scene_name())).color(Color32::LIGHT_BLUE).strong());
 
                 ui.separator();
 

@@ -1,10 +1,7 @@
-// В editor/src/ui/hierarchy.rs
-
 use crate::ui::EditorContext;
 use egui::{Color32, RichText, ScrollArea, Sense, Ui, Vec2};
 
 pub fn draw_hierarchy(ui: &mut Ui, ctx: &mut EditorContext) {
-    // 1. Баннер режима изоляции префаба
     if let Some(ref path) = ctx.asset_browser_state.editing_prefab_path.clone() {
         let file_name = path.file_name().unwrap_or_default().to_string_lossy();
         ui.group(|ui| {
@@ -26,12 +23,12 @@ pub fn draw_hierarchy(ui: &mut Ui, ctx: &mut EditorContext) {
     ui.horizontal(|ui| {
         if ui.button("➕ Empty").clicked() {
             let id = ctx.world.spawn_empty("New Entity");
-            *ctx.selected_entity = Some(id);
+            *ctx.selected_entity = Some(id.0);
         }
         if let Some(parent_id) = *ctx.selected_entity {
             if ui.button("➕ Child").clicked() {
                 let id = ctx.world.spawn_child(parent_id, "Child Entity");
-                *ctx.selected_entity = Some(id);
+                *ctx.selected_entity = Some(id.0);
             }
         }
     });
@@ -43,18 +40,16 @@ pub fn draw_hierarchy(ui: &mut Ui, ctx: &mut EditorContext) {
             ui.label(RichText::new("Scene is empty.").italics());
         } else {
             for root_id in roots {
-                // Скрываем служебные источники света превью префаба из дерева
                 let name = ctx.world.get_entity_name(root_id);
                 if name.starts_with("__") {
                     continue;
                 }
 
-                draw_entity_node(ui, ctx, root_id);
+                draw_entity_node(ui, ctx, root_id.0);
             }
         }
     });
 
-    // Визуальная плашка под курсором при перетаскивании сущности в Asset Browser
     if let Some(dragged_id) = ctx.asset_browser_state.dragged_entity {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
         if let Some(pos) = ui.input(|i| i.pointer.hover_pos().or(i.pointer.interact_pos())) {
@@ -81,7 +76,6 @@ fn draw_label_and_handle_drag(
     is_selected: bool,
     header_text: &str,
 ) {
-    // ЯРКОЕ ВЫДЕЛЕНИЕ: синий фон при выделении, прозрачный в покое
     let bg_fill = if is_selected {
         ui.visuals().selection.bg_fill
     } else {
@@ -125,7 +119,7 @@ fn draw_label_and_handle_drag(
         }
         if ui.button("➕ Add Child").clicked() {
             let child_id = ctx.world.spawn_child(entity_id, "New Child");
-            *ctx.selected_entity = Some(child_id);
+            *ctx.selected_entity = Some(child_id.0);
             ui.close();
         }
         ui.separator();
@@ -180,7 +174,7 @@ fn draw_entity_node(ui: &mut Ui, ctx: &mut EditorContext, entity_id: u64) {
                 for child_id in children {
                     let child_name = ctx.world.get_entity_name(child_id);
                     if !child_name.starts_with("__") {
-                        draw_entity_node(ui, ctx, child_id);
+                        draw_entity_node(ui, ctx, child_id.0);
                     }
                 }
             });

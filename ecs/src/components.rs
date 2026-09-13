@@ -55,11 +55,40 @@ impl Default for CameraComponent {
 
 // --- Transform Components ---
 
-#[derive(Component, Debug, Clone, Copy, PartialEq)]
+#[derive(Component, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Transform {
+    #[serde(with = "vec3_serde")]
     pub position: Vec3,
+    #[serde(with = "quat_serde")]
     pub rotation: Quat,
+    #[serde(with = "vec3_serde")]
     pub scale: Vec3,
+}
+
+mod vec3_serde {
+    use glam::Vec3;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(v: &Vec3, s: S) -> Result<S::Ok, S::Error> {
+        v.to_array().serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec3, D::Error> {
+        <[f32; 3]>::deserialize(d).map(Vec3::from_array)
+    }
+}
+
+mod quat_serde {
+    use glam::Quat;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(q: &Quat, s: S) -> Result<S::Ok, S::Error> {
+        q.to_array().serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Quat, D::Error> {
+        <[f32; 4]>::deserialize(d).map(Quat::from_array)
+    }
 }
 
 impl Default for Transform {
@@ -268,11 +297,35 @@ impl Default for CharacterControllerComponent {
 
 // --- Render Components ---
 
-#[derive(Component, Debug, Clone, PartialEq, Eq)]
+#[derive(Component, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelComponent {
+    #[serde(with = "asset_id_serde")]
     pub id: AssetId,
     pub mesh_index: usize,
     pub render_layer: u32,
+}
+
+impl Default for ModelComponent {
+    fn default() -> Self {
+        Self {
+            id: AssetId::from_path(""),
+            mesh_index: 0,
+            render_layer: RenderLayers::DEFAULT,
+        }
+    }
+}
+
+mod asset_id_serde {
+    use asset::AssetId;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(id: &AssetId, s: S) -> Result<S::Ok, S::Error> {
+        id.path().serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<AssetId, D::Error> {
+        String::deserialize(d).map(|p| AssetId::from_path(&p))
+    }
 }
 
 impl ModelComponent {
@@ -358,11 +411,17 @@ impl Default for PrefabRef {
 #[derive(Component, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EntityName(pub String);
 
-#[derive(Component, Debug, Clone, Copy, Default)]
+#[derive(Component, Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct Static;
 
-#[derive(Component, Debug, Clone, Copy, Default)]
+#[derive(Component, Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct Dynamic;
 
-#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct SceneEntity;
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SceneEntity(pub bool);
+
+impl Default for SceneEntity {
+    fn default() -> Self {
+        Self(true)
+    }
+}

@@ -2,6 +2,9 @@ pub mod app;
 pub mod camera;
 pub mod game;
 pub mod physics;
+pub mod scene;
+
+pub use scene::SceneManager;
 
 use std::sync::Arc;
 use tokio::runtime::Runtime;
@@ -41,6 +44,8 @@ pub struct EngineMetrics {
 pub struct EngineRunner<A: Application> {
     pub app: A,
     pub config: EngineConfig,
+
+    pub scene_manager: SceneManager,
 
     pub egui_state: Option<egui_winit::State>,
     pub egui_ctx: egui::Context,
@@ -221,6 +226,54 @@ impl<A: Application> EngineRunner<A> {
             }
         });
     }
+
+    pub fn execute_load_scene(&mut self, path: &std::path::Path) -> anyhow::Result<()> {
+        log::info!("[ENGINE] Loading scene: {:?}", path);
+
+        let path_str = path.to_string_lossy();
+
+        if self.play_state == PlayState::Playing || self.play_state == PlayState::Simulating {
+            self.game_plugin.on_stop(&self.world);
+        }
+
+        self.physics.clear();
+        self.physics_accumulator = 0.0;
+
+        ecs::serialization::load_world(&mut self.world, &path_str)?;
+
+        let mut models_in_scene = Vec::new();
+        self.world.each_model(|_, model_comp| {
+            models_in_scene.push(model_comp.id.path());
+        });
+        models_in_scene.dedup();
+
+        for model_path in models_in_scene {
+            self.load_model_async(&model_path);
+        }
+
+        self.physics.sync_from_ecs(&self.world);
+
+        if self.play_state == PlayState::Playing || self.play_state == PlayState::Simulating {
+            self.game_plugin.on_start(&self.world, &mut self.physics);
+        }
+
+        self.scene_manager.current_scene_path = Some(path.to_path_buf());
+        self.scene_manager.is_dirty = false;
+
+        log::info!("[ENGINE] Scene loaded successfully: {:?}", path);
+        Ok(())
+    }
+
+    pub fn execute_new_scene(&mut self) {
+        if self.play_state == PlayState::Playing || self.play_state == PlayState::Simulating {
+            self.game_plugin.on_stop(&self.world);
+        }
+        self.physics.clear();
+        self.world.clear_scene();
+        self.scene_manager.current_scene_path = None;
+        self.scene_manager.is_dirty = false;
+        log::info!("[ENGINE] Created new empty scene.");
+    }
 }
 
 impl<A: Application> ApplicationHandler for EngineRunner<A> {
@@ -372,6 +425,7 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                 &mut self.world,
                 &mut self.camera,
                 &mut self.camera_controller,
+                &mut self.scene_manager,
                 &event,
             ) {
                 return;
@@ -386,7 +440,6 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                 self.last_frame_time = now;
                 self.frames_this_second += 1;
 
-                // Экспоненциальное сглаживание для UI, чтобы цифры не дрожали от системного шума
                 self.metrics.frame_time_ms = if self.metrics.frame_time_ms == 0.0 {
                     instant_frame_time
                 } else {
@@ -427,6 +480,18 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                     self.asset_server
                         .unload::<render::model::Model>(asset::AssetId::from_path(&name));
                     self.load_model_async(&name);
+                }
+
+                match std::mem::replace(&mut self.scene_manager.pending_transition, scene::SceneTransition::None) {
+                    scene::SceneTransition::Load(path) => {
+                        if let Err(e) = self.execute_load_scene(&path) {
+                            log::error!("Failed to transition to scene {:?}: {e}", path);
+                        }
+                    }
+                    scene::SceneTransition::NewScene => {
+                        self.execute_new_scene();
+                    }
+                    scene::SceneTransition::None => {}
                 }
 
                 match self.play_state {
@@ -569,7 +634,6 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
 
                 self.world.update_transforms();
 
-                // Интерполяция поз физических тел: вызывается ПОСЛЕ update_transforms и ДО сбора batches
                 let alpha = (self.physics_accumulator / self.fixed_timestep).clamp(0.0, 1.0);
                 if self.play_state == PlayState::Playing || self.play_state == PlayState::Simulating {
                     self.physics.update_render_transforms(&self.world, alpha);
@@ -630,6 +694,7 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                         &mut load_requests,
                         self.play_state,
                         &self.asset_server,
+                        &mut self.scene_manager,
                         viewport_texture_id,
                         &mut desired_viewport_size,
                     );
@@ -806,7 +871,6 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                     }
                 }
 
-                // Запрос перерисовки вызывается строго один раз в самом конце
                 if let Some(window) = &self.window {
                     window.request_redraw();
                 }
@@ -856,6 +920,8 @@ pub fn run<A: Application>(
     let mut runner = EngineRunner {
         app,
         config,
+
+        scene_manager: SceneManager::new(),
 
         egui_state,
         egui_ctx,

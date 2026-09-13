@@ -114,11 +114,11 @@ pub fn open_prefab_for_editing(path: &Path, ctx: &mut EditorContext) {
                 ctx.world,
                 Some(glam::Vec3::ZERO),
                 Some(glam::Quat::IDENTITY),
-                None,
+                None::<ecs::Entity>,
             ) {
-                *ctx.selected_entity = Some(root_id);
+                *ctx.selected_entity = Some(root_id.0);
                 ctx.asset_browser_state.editing_prefab_path = Some(path.to_path_buf());
-                ctx.asset_browser_state.editing_prefab_root = Some(root_id);
+                ctx.asset_browser_state.editing_prefab_root = Some(root_id.0);
 
                 let key_light = ctx.world.spawn_empty("__PrefabPreviewKeyLight");
                 ctx.world.add_transform(key_light, ecs::Transform {
@@ -280,7 +280,6 @@ pub fn draw_asset_browser(ui: &mut Ui, ctx: &mut EditorContext) {
 
     let is_dragging_entity = ctx.asset_browser_state.dragged_entity.is_some();
 
-    // Запоминаем границы области Asset Browser
     let browser_rect = ui.available_rect_before_wrap();
 
     egui::Frame::new().inner_margin(4.0).show(ui, |ui| {
@@ -297,7 +296,6 @@ pub fn draw_asset_browser(ui: &mut Ui, ctx: &mut EditorContext) {
         |ui| {
             let folder_w = ctx.asset_browser_state.folder_panel_width;
 
-            // ПАНЕЛЬ ПАПОК
             ui.allocate_ui_with_layout(
                 Vec2::new(folder_w, available_h),
                 egui::Layout::top_down(egui::Align::LEFT),
@@ -317,7 +315,6 @@ pub fn draw_asset_browser(ui: &mut Ui, ctx: &mut EditorContext) {
                 },
             );
 
-            // ПОДВИЖНЫЙ РАЗДЕЛИТЕЛЬ
             let (sep_rect, _) = ui.allocate_exact_size(Vec2::new(8.0, available_h), Sense::hover());
             let sep_resp = ui.interact(sep_rect, ui.id().with("folders_splitter"), Sense::drag());
 
@@ -342,7 +339,6 @@ pub fn draw_asset_browser(ui: &mut Ui, ctx: &mut EditorContext) {
             };
             ui.painter().vline(sep_rect.center().x, sep_rect.y_range(), egui::Stroke::new(1.0, line_color));
 
-            // ОБЛАСТЬ ФАЙЛОВ
             let available_w = ui.available_width() - if show_preview { 220.0 } else { 0.0 };
             ui.allocate_ui_with_layout(
                 Vec2::new(available_w.max(200.0), available_h),
@@ -367,7 +363,6 @@ pub fn draw_asset_browser(ui: &mut Ui, ctx: &mut EditorContext) {
         },
     );
 
-    // ПОДСВЕТКА ЗОНЫ СБРОСА ПРИ ПЕРЕТАСКИВАНИИ
     if is_dragging_entity {
         ui.painter().rect_stroke(
             browser_rect,
@@ -377,7 +372,6 @@ pub fn draw_asset_browser(ui: &mut Ui, ctx: &mut EditorContext) {
         );
     }
 
-    // ОБРАБОТКА СБРОСА (DROP) МЫШИ
     if ui.input(|i| i.pointer.any_released()) {
         if let Some(dragged_entity_id) = ctx.asset_browser_state.dragged_entity.take() {
             let pointer_pos = ui.input(|i| i.pointer.interact_pos().or(i.pointer.hover_pos()));
@@ -845,6 +839,10 @@ fn draw_file_card(ui: &mut Ui, entry: &CachedDirEntry, ctx: &mut EditorContext) 
             spawn_model_in_scene(&entry.path, ctx);
         } else if entry.ext == "prefab" {
             open_prefab_for_editing(&entry.path, ctx);
+        } else if entry.ext == "scene" || entry.ext == "ron" {
+            ctx.scene_manager.queue_load(&entry.path);
+            *ctx.selected_entity = None;
+            log::info!("Switched to scene: {:?}", entry.path);
         }
     }
 
@@ -1109,58 +1107,6 @@ fn draw_file_list_item(ui: &mut Ui, entry: &CachedDirEntry, ctx: &mut EditorCont
     });
 }
 
-// fn handle_file_interactions(resp: &egui::Response, entry: &CachedDirEntry, ctx: &mut EditorContext) {
-//     if resp.clicked() {
-//         ctx.asset_browser_state.selected_file = Some(entry.path.clone());
-//         ctx.asset_browser_state.selected_file_size_kb = fs::metadata(&entry.path).ok().map(|m| m.len() as f32 / 1024.0);
-        
-//         if entry.ext == "bin" {
-//             ctx.asset_browser_state.cached_model_info = read_model_info(&entry.path);
-//         } else {
-//             ctx.asset_browser_state.cached_model_info = None;
-//         }
-//     }
-
-//     if resp.drag_started() && entry.ext == "bin" {
-//         ctx.asset_browser_state.dragged_asset = Some(entry.path.clone());
-//     }
-
-//     if resp.double_clicked() && entry.ext == "bin" {
-//         spawn_model_in_scene(&entry.path, ctx);
-//     }
-
-//     resp.context_menu(|ui| {
-//         if entry.ext == "bin" {
-//             if ui.button("➕ Spawn in Scene").clicked() {
-//                 spawn_model_in_scene(&entry.path, ctx);
-//                 ui.close();
-//             }
-//         }
-
-//         if entry.ext == "glb" || entry.ext == "gltf" {
-//             if ui.button("🔥 Cook to .bin").clicked() {
-//                 let cooking_tasks = ctx.asset_browser_state.cooking_assets.clone();
-//                 cook_asset(&entry.path, cooking_tasks);
-//                 ui.close();
-//             }
-//         }
-
-//         if ui.button("📂 Show in Explorer").clicked() {
-//             reveal_in_explorer(&entry.path);
-//             ui.close();
-//         }
-
-//         ui.separator();
-//         if ui.button(RichText::new("🗑 Delete").color(Color32::RED)).clicked() {
-//             let _ = fs::remove_file(&entry.path);
-//             ctx.asset_browser_state.needs_refresh = true;
-//             ctx.asset_browser_state.selected_file = None;
-//             ctx.asset_browser_state.cached_model_info = None;
-//             ui.close();
-//         }
-//     });
-// }
-
 fn draw_asset_preview_drawer(ui: &mut Ui, ctx: &mut EditorContext) {
     let selected_path = match ctx.asset_browser_state.selected_file.clone() {
         Some(p) => p,
@@ -1241,7 +1187,7 @@ fn spawn_model_in_scene(path: &Path, ctx: &mut EditorContext) {
                 let model_id = asset::AssetId::from_path(name_str);
                 let pos = ctx.camera.target;
                 let spawned_id = ecs::spawn_scene(ctx.world, model_id, &baked_model, pos);
-                *ctx.selected_entity = Some(spawned_id);
+                *ctx.selected_entity = Some(spawned_id.0);
                 ctx.load_requests.push(name_str.to_string());
                 log::info!("Spawned {} in ECS", name_str);
             }
