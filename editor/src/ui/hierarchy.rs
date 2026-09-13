@@ -160,7 +160,8 @@ fn draw_entity_node(ui: &mut Ui, ctx: &mut EditorContext, entity_id: u64) {
         "📁"
     };
 
-    let header_text = format!("{} {} ({})", icon, display_name, entity_id);
+    let e = ecs::Entity(entity_id);
+    let header_text = format!("{} {} (#{})", icon, display_name, e.format_short());
     let header_id = ui.make_persistent_id(entity_id);
     let has_children = ctx.world.has_children(entity_id);
 

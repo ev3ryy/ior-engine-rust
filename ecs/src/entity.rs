@@ -22,6 +22,25 @@ impl Entity {
     pub const fn is_null(self) -> bool {
         self.0 == 0
     }
+
+    #[inline]
+    pub const fn index(self) -> u32 {
+        self.0 as u32
+    }
+
+    #[inline]
+    pub const fn generation(self) -> u32 {
+        (self.0 >> 32) as u32
+    }
+
+    pub fn format_short(self) -> String {
+        let gen_count = self.generation();
+        if gen_count == 0 {
+            format!("{}", self.index())
+        } else {
+            format!("{} v{}", self.index(), gen_count)
+        }
+    }
 }
 
 impl From<u64> for Entity {
@@ -46,6 +65,6 @@ impl fmt::Debug for Entity {
 
 impl fmt::Display for Entity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "{}", self.format_short())
     }
 }

@@ -192,7 +192,12 @@ pub fn draw_inspector(ui: &mut Ui, ctx: &mut EditorContext) {
     }
 
     draw_entity_header(ui, ctx, entity_id);
-    ui.label(format!("Entity ID: {}", entity_id));
+    let e = ecs::Entity(entity_id);
+    ui.label(
+        RichText::new(format!("Entity: #{} (raw: {})", e.format_short(), entity_id))
+            .weak()
+            .size(11.0),
+    );
     ui.separator();
 
     ScrollArea::vertical().show(ui, |ui| {
