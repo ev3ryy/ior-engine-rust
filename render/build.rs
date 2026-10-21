@@ -35,6 +35,10 @@ fn main() {
         ShaderTarget { src: "shaders/bloom.slang", entry: "fs_upsample", stage: "fragment", dst: "bloom_up_fs.wgsl" },
         ShaderTarget { src: "shaders/blit.slang", entry: "vs_main", stage: "vertex", dst: "blit_vs.wgsl" },
         ShaderTarget { src: "shaders/blit.slang", entry: "fs_main", stage: "fragment", dst: "blit_fs.wgsl" },
+        ShaderTarget { src: "shaders/wireframe.slang", entry: "fs_main", stage: "fragment", dst: "wireframe_fs.wgsl" },
+        ShaderTarget { src: "shaders/wireframe.slang", entry: "vs_main", stage: "vertex", dst: "wireframe_vs.wgsl" },
+        ShaderTarget { src: "shaders/outline.slang", entry: "fs_main", stage: "fragment", dst: "outline_fs.wgsl" },
+        ShaderTarget { src: "shaders/outline.slang", entry: "vs_main", stage: "vertex", dst: "outline_vs.wgsl" },
     ];
 
     for target in &shaders {

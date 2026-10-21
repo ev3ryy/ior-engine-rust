@@ -30,6 +30,26 @@ pub struct CameraUniform {
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct OutlineUniform {
+    pub model_matrix: Mat4,
+    pub outline_color: Vec4,
+    pub outline_width: f32,
+    pub _pad0: f32,
+    pub _pad1: f32,
+    pub _pad2: f32,
+}
+
+#[derive(Clone)]
+pub struct SelectedOutline {
+    pub model: Arc<model::Model>,
+    pub mesh_index: usize,
+    pub model_matrix: Mat4,
+    pub color: [f32; 4],
+    pub width: f32,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct InstanceRaw {
     #[allow(dead_code)]
     pub model: Mat4,
@@ -148,6 +168,16 @@ pub struct Renderer {
     pub shadow_system: shadow_system::ShadowSystem,
     pub light_cluster: light_cluster::LightClusterSystem,
     pub pipelines: pipelines::RenderPipelines,
+
+    pub debug_line_buffer: wgpu::Buffer,
+    pub debug_line_count: u32,
+    pub debug_line_pipeline: pipelines::DebugLinePipeline,
+
+    pub outline_pipeline: pipelines::OutlinePipeline,
+    pub outline_uniform_buffer: wgpu::Buffer,
+    pub outline_bind_group_layout: Arc<wgpu::BindGroupLayout>,
+    pub outline_bind_group: wgpu::BindGroup,
+    pub selected_outline: Option<SelectedOutline>,
 
     // Offscreen Viewport Target
     pub viewport_width: u32,
@@ -799,6 +829,59 @@ impl Renderer {
                 cache: None,
             });
 
+        let debug_line_pipeline = pipelines::DebugLinePipeline::new(
+            &device,
+            &light_cluster.camera_bind_group_layout,
+            msaa_samples,
+        );
+
+        let debug_line_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Debug Line Buffer"),
+            size: (16384 * std::mem::size_of::<[f32; 7]>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let debug_line_count = 0;
+
+        let outline_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Outline Uniform Buffer"),
+            size: std::mem::size_of::<OutlineUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // 2. BindGroupLayout (binding 0: Uniform)
+        let outline_bind_group_layout =
+            Arc::new(device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Outline Bind Group Layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            }));
+
+        let outline_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Outline Bind Group"),
+            layout: &outline_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: outline_uniform_buffer.as_entire_binding(),
+            }],
+        });
+
+        let outline_pipeline = pipelines::OutlinePipeline::new(
+            &device,
+            &light_cluster.camera_bind_group_layout,
+            &outline_bind_group_layout,
+            msaa_samples,
+        );
+
         Ok(Self {
             device,
             queue,
@@ -809,6 +892,16 @@ impl Renderer {
             shadow_system,
             light_cluster,
             pipelines,
+
+            debug_line_pipeline,
+            debug_line_buffer,
+            debug_line_count,
+
+            outline_pipeline,
+            outline_uniform_buffer,
+            outline_bind_group_layout,
+            outline_bind_group,
+            selected_outline: None,
 
             viewport_width: width,
             viewport_height: height,
@@ -889,6 +982,17 @@ impl Renderer {
         }
 
         self.pipelines.rebuild_for_msaa(&self.device, self.msaa_samples);
+        self.debug_line_pipeline = pipelines::DebugLinePipeline::new(
+            &self.device,
+            &self.light_cluster.camera_bind_group_layout,
+            self.msaa_samples,
+        );
+        self.outline_pipeline = pipelines::OutlinePipeline::new(
+            &self.device,
+            &self.light_cluster.camera_bind_group_layout,
+            &self.outline_bind_group_layout,
+            self.msaa_samples,
+        );
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -982,6 +1086,64 @@ impl Renderer {
 
     pub fn upload_lights(&mut self, lights: &[LightUniform], camera: &CameraUniform) {
         self.light_cluster.upload_lights(&self.queue, lights, camera);
+    }
+
+    pub fn upload_debug_lines(&mut self, lines: &[[f32; 7]]) {
+        self.debug_line_count = lines.len() as u32;
+        if lines.is_empty() {
+            return;
+        }
+
+        let needed_size = (lines.len() * std::mem::size_of::<[f32; 7]>()) as u64;
+        if needed_size > self.debug_line_buffer.size() {
+            self.debug_line_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Debug Line Buffer"),
+                size: (needed_size * 2).max(16384 * std::mem::size_of::<[f32; 7]>() as u64),
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+        }
+
+        self.queue.write_buffer(
+            &self.debug_line_buffer,
+            0,
+            bytemuck::cast_slice(lines),
+        );
+    }
+
+    pub fn update_outline_uniform(&self, model_matrix: Mat4, color: [f32; 4], width: f32) {
+        let uniform = OutlineUniform {
+            model_matrix,
+            outline_color: Vec4::from_array(color),
+            outline_width: width,
+            _pad0: 0.0,
+            _pad1: 0.0,
+            _pad2: 0.0,
+        };
+        self.queue.write_buffer(
+            &self.outline_uniform_buffer,
+            0,
+            bytemuck::cast_slice(&[uniform]),
+        );
+    }
+
+    pub fn set_selected_outline(
+        &mut self,
+        model: Arc<model::Model>,
+        mesh_index: usize,
+        model_matrix: Mat4,
+    ) {
+        self.selected_outline = Some(SelectedOutline {
+            model,
+            mesh_index,
+            model_matrix,
+            color: [2.5, 1.3, 0.1, 1.0], // orange
+            width: 0.04,
+        });
+    }
+
+    pub fn clear_selected_outline(&mut self) {
+        self.selected_outline = None;
     }
 
     pub fn render_batches(
@@ -1221,6 +1383,14 @@ impl Renderer {
             }
         }
 
+        if let Some(ref outline) = self.selected_outline {
+            self.update_outline_uniform(
+                outline.model_matrix,
+                outline.color,
+                outline.width,
+            );
+        }
+
         // --- 4. Main PBR Forward Pass (HDR + MSAA Resolve) ---
         {
             let color_attachment = if self.msaa_samples > 1 {
@@ -1272,6 +1442,24 @@ impl Renderer {
                     .set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 color_pass.set_bind_group(0, &material.bind_group, &[]);
                 color_pass.draw_indexed(0..mesh.num_elements, 0, range.clone());
+            }
+
+            if self.debug_line_count > 0 {
+                color_pass.set_pipeline(&self.debug_line_pipeline.pipeline);
+                color_pass.set_bind_group(0, &self.light_cluster.camera_bind_group, &[]);
+                color_pass.set_vertex_buffer(0, self.debug_line_buffer.slice(..));
+                color_pass.draw(0..self.debug_line_count, 0..1);
+            }
+
+            if let Some(ref outline) = self.selected_outline {
+                if let Some(mesh) = outline.model.meshes.get(outline.mesh_index) {
+                    color_pass.set_pipeline(&self.outline_pipeline.pipeline);
+                    color_pass.set_bind_group(0, &self.light_cluster.camera_bind_group, &[]);
+                    color_pass.set_bind_group(1, &self.outline_bind_group, &[]);
+                    color_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                    color_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    color_pass.draw_indexed(0..mesh.num_elements, 0, 0..1);
+                }
             }
         }
 

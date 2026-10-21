@@ -62,26 +62,45 @@ pub fn draw_viewport(ui: &mut egui::Ui, ctx: &mut EditorContext) {
 
                     // spawn on release
                     if ui.input(|i| i.pointer.any_released()) {
-                        if let Ok(data) = std::fs::read(dragged_path) {
-                            if let Ok(baked_model) =
-                                rkyv::from_bytes::<shared::BakedModel, rkyv::rancor::Error>(&data)
-                            {
-                                if let Some(file_name) =
-                                    dragged_path.file_name().and_then(|n| n.to_str())
+                        let ext = dragged_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+
+                        if ext == "bin" {
+                            if let Ok(data) = std::fs::read(dragged_path) {
+                                if let Ok(baked_model) =
+                                    rkyv::from_bytes::<shared::BakedModel, rkyv::rancor::Error>(&data)
                                 {
-                                    let model_id = asset::AssetId::from_path(file_name);
-                                    let spawned_id = ecs::spawn_scene(
-                                        ctx.world,
-                                        model_id,
-                                        &baked_model,
-                                        spawn_pos,
-                                    );
-                                    *ctx.selected_entity = Some(spawned_id);
-                                    ctx.load_requests.push(file_name.to_string());
-                                    log::info!("Spawned {:?} at {}", file_name, spawn_pos);
+                                    if let Some(file_name) =
+                                        dragged_path.file_name().and_then(|n| n.to_str())
+                                    {
+                                        let model_id = asset::AssetId::from_path(file_name);
+                                        let spawned_id = ecs::spawn_scene(
+                                            ctx.world,
+                                            model_id,
+                                            &baked_model,
+                                            spawn_pos,
+                                        );
+                                        *ctx.selected_entity = Some(spawned_id.0);
+                                        ctx.load_requests.push(file_name.to_string());
+                                        log::info!("Spawned model {:?} at {}", file_name, spawn_pos);
+                                    }
+                                }
+                            }
+                        } else if ext == "prefab" {
+                            match ctx.world.spawn_prefab(
+                                &dragged_path.to_string_lossy(),
+                                spawn_pos,
+                                glam::Quat::IDENTITY,
+                            ) {
+                                Ok(spawned_id) => {
+                                    *ctx.selected_entity = Some(spawned_id.0);
+                                    log::info!("Spawned prefab {:?} at {}", dragged_path, spawn_pos);
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to spawn prefab {:?}: {e}", dragged_path);
                                 }
                             }
                         }
+
                         ctx.asset_browser_state.dragged_asset = None;
                     }
                 }
@@ -225,7 +244,7 @@ pub fn pick_entity(
 
                 if let Some(t) = ray.intersect_obb(aabb_min, aabb_max, global.0) {
                     if t > 0.0 && closest_hit.map_or(true, |(_, min_t)| t < min_t) {
-                        closest_hit = Some((entity_id, t));
+                        closest_hit = Some((entity_id.0, t));
                     }
                 }
             }
@@ -236,7 +255,7 @@ pub fn pick_entity(
         let center = global.translation();
         if let Some(t) = ray.intersect_sphere(center, 0.5) {
             if t > 0.0 && closest_hit.map_or(true, |(_, min_t)| t < min_t) {
-                closest_hit = Some((entity_id, t));
+                closest_hit = Some((entity_id.0, t));
             }
         }
     });
@@ -245,7 +264,7 @@ pub fn pick_entity(
         let center = global.translation();
         if let Some(t) = ray.intersect_sphere(center, 0.5) {
             if t > 0.0 && closest_hit.map_or(true, |(_, min_t)| t < min_t) {
-                closest_hit = Some((entity_id, t));
+                closest_hit = Some((entity_id.0, t));
             }
         }
     });
@@ -454,11 +473,17 @@ pub fn draw_collider_wireframe(
             lines.push((Vec3::new(0.0, h, r), Vec3::new(0.0, -h, r)));
             lines.push((Vec3::new(0.0, h, -r), Vec3::new(0.0, -h, -r)));
         }
+        ecs::ColliderShapeType::TriMesh | ecs::ColliderShapeType::ConvexHull => {}
     }
 
+    let offset_pos = Vec3::from(col.offset_position);
+    let offset_rot = glam::Quat::from_array(col.offset_rotation);
+    let offset_mat = Mat4::from_rotation_translation(offset_rot, offset_pos);
+    let final_model_mat = model_mat * offset_mat;
+
     for (l0, l1) in lines {
-        let p0 = model_mat.transform_point3(l0);
-        let p1 = model_mat.transform_point3(l1);
+        let p0 = final_model_mat.transform_point3(l0);
+        let p1 = final_model_mat.transform_point3(l1);
 
         if let Some((s0, s1)) = project_3d_line(p0, p1, view_proj, viewport_rect) {
             painter.line_segment([s0, s1], stroke);

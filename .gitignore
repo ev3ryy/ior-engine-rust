@@ -11,6 +11,10 @@ rustc-ice-*.txt
 **/target/tarpaulin/
 **/snapshots/
 
+.ron
+.bak
+.cfg
+
 .glb
 .gltf
 

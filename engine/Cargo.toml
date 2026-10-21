@@ -8,6 +8,7 @@ edition = "2024"
 render = { path = "../render" }
 ecs = {path = "../ecs"}
 asset = {path = "../asset"}
+shared = {path = "../shared"}
 anyhow = "1.0"
 glam = "0.33.2"
 log = "0.4"
@@ -16,5 +17,7 @@ egui = "0.36"
 egui-wgpu = "0.36"
 egui-winit = "0.36"
 rapier3d = "0.35.3"
+image = "0.25.10"
+crossbeam = "0.8.5"
 winit = { version = "0.30", features = ["android-native-activity"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread"] }

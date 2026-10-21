@@ -3,6 +3,16 @@ use flecs_ecs::prelude::*;
 use glam::{Mat4, Quat, Vec3};
 use serde::{Deserialize, Serialize};
 
+pub struct RenderLayers;
+
+impl RenderLayers {
+    pub const DEFAULT: u32   = 1 << 0;
+    pub const VIEWMODEL: u32 = 1 << 1;
+    pub const UI_3D: u32     = 1 << 2;
+    pub const ALL: u32       = u32::MAX;
+}
+
+
 // --- Camera Component ---
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -17,6 +27,11 @@ pub struct CameraComponent {
     pub is_active: bool,
     #[serde(default)]
     pub priority: i32,
+
+    #[serde(default = "default_u32_max")]
+    pub culling_mask: u32,
+    #[serde(default)]
+    pub clear_depth: bool, 
 }
 
 fn default_fovy() -> f32 { 60.0 }
@@ -32,17 +47,48 @@ impl Default for CameraComponent {
             zfar: default_zfar(),
             is_active: default_true(),
             priority: 0,
+            culling_mask: u32::MAX,
+            clear_depth: false,
         }
     }
 }
 
 // --- Transform Components ---
 
-#[derive(Component, Debug, Clone, Copy, PartialEq)]
+#[derive(Component, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Transform {
+    #[serde(with = "vec3_serde")]
     pub position: Vec3,
+    #[serde(with = "quat_serde")]
     pub rotation: Quat,
+    #[serde(with = "vec3_serde")]
     pub scale: Vec3,
+}
+
+mod vec3_serde {
+    use glam::Vec3;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(v: &Vec3, s: S) -> Result<S::Ok, S::Error> {
+        v.to_array().serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec3, D::Error> {
+        <[f32; 3]>::deserialize(d).map(Vec3::from_array)
+    }
+}
+
+mod quat_serde {
+    use glam::Quat;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(q: &Quat, s: S) -> Result<S::Ok, S::Error> {
+        q.to_array().serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Quat, D::Error> {
+        <[f32; 4]>::deserialize(d).map(Quat::from_array)
+    }
 }
 
 impl Default for Transform {
@@ -147,6 +193,8 @@ pub enum ColliderShapeType {
     Sphere,
     Capsule,
     Cylinder,
+    TriMesh,
+    ConvexHull,
 }
 
 impl Default for ColliderShapeType {
@@ -160,18 +208,34 @@ pub struct ColliderComponent {
     #[serde(default)]
     pub shape_type: ColliderShapeType,
     #[serde(default = "default_collider_size")]
-    pub size: [f32; 3], // half-extents для Cuboid, x = radius для Sphere, [x=radius, y=half_height] для Capsule/Cylinder
+    pub size: [f32; 3],
     #[serde(default = "default_friction")]
     pub friction: f32,
     #[serde(default = "default_restitution")]
     pub restitution: f32,
     #[serde(default)]
     pub is_sensor: bool,
+
+    #[serde(default = "default_vec3_zero")]
+    pub offset_position: [f32; 3],
+    #[serde(default = "default_quat_identity")]
+    pub offset_rotation: [f32; 4], // [x, y, z, w]
+
+    #[serde(default = "default_u32_max")]
+    pub collision_memberships: u32,
+    #[serde(default = "default_u32_max")]
+    pub collision_filters: u32,
+
+    #[serde(default = "default_true")]
+    pub generate_collision_events: bool,
 }
 
 fn default_collider_size() -> [f32; 3] { [0.5, 0.5, 0.5] }
 fn default_friction() -> f32 { 0.5 }
 fn default_restitution() -> f32 { 0.0 }
+fn default_vec3_zero() -> [f32; 3] { [0.0, 0.0, 0.0] }
+fn default_quat_identity() -> [f32; 4] { [0.0, 0.0, 0.0, 1.0] }
+fn default_u32_max() -> u32 { u32::MAX }
 
 impl Default for ColliderComponent {
     fn default() -> Self {
@@ -181,16 +245,105 @@ impl Default for ColliderComponent {
             friction: default_friction(),
             restitution: default_restitution(),
             is_sensor: false,
+            offset_position: default_vec3_zero(),
+            offset_rotation: default_quat_identity(),
+            collision_memberships: default_u32_max(),
+            collision_filters: default_u32_max(),
+            generate_collision_events: true,
+        }
+    }
+}
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct CharacterControllerComponent {
+    #[serde(default = "default_autostep_height")]
+    pub autostep_max_height: f32,
+    #[serde(default = "default_autostep_width")]
+    pub autostep_min_width: f32,
+    #[serde(default = "default_max_slope")]
+    pub max_slope_climb_angle: f32,
+    #[serde(default = "default_min_slide")]
+    pub min_slope_slide_angle: f32,
+    #[serde(default = "default_snap_distance")]
+    pub snap_to_ground_distance: f32,
+    #[serde(default = "default_true")]
+    pub enable_autostep: bool,
+    #[serde(default = "default_true")]
+    pub enable_snap_to_ground: bool,
+    #[serde(default = "default_true")]
+    pub slide: bool,
+}
+
+fn default_autostep_height() -> f32 { 0.35 }
+fn default_autostep_width() -> f32 { 0.2 }
+fn default_max_slope() -> f32 { 45.0 }
+fn default_min_slide() -> f32 { 45.0 }
+fn default_snap_distance() -> f32 { 0.25 }
+
+impl Default for CharacterControllerComponent {
+    fn default() -> Self {
+        Self {
+            autostep_max_height: default_autostep_height(),
+            autostep_min_width: default_autostep_width(),
+            max_slope_climb_angle: default_max_slope(),
+            min_slope_slide_angle: default_min_slide(),
+            snap_to_ground_distance: default_snap_distance(),
+            enable_autostep: true,
+            enable_snap_to_ground: true,
+            slide: true,
         }
     }
 }
 
 // --- Render Components ---
 
-#[derive(Component, Debug, Clone, PartialEq, Eq)]
+#[derive(Component, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelComponent {
+    #[serde(with = "asset_id_serde")]
     pub id: AssetId,
     pub mesh_index: usize,
+    pub render_layer: u32,
+}
+
+impl Default for ModelComponent {
+    fn default() -> Self {
+        Self {
+            id: AssetId::from_path(""),
+            mesh_index: 0,
+            render_layer: RenderLayers::DEFAULT,
+        }
+    }
+}
+
+mod asset_id_serde {
+    use asset::AssetId;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(id: &AssetId, s: S) -> Result<S::Ok, S::Error> {
+        id.path().serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<AssetId, D::Error> {
+        String::deserialize(d).map(|p| AssetId::from_path(&p))
+    }
+}
+
+impl ModelComponent {
+    pub fn new(id: AssetId, mesh_index: usize) -> Self {
+        Self {
+            id,
+            mesh_index,
+            render_layer: RenderLayers::DEFAULT,
+        }
+    }
+
+    pub fn with_layer(id: AssetId, mesh_index: usize, render_layer: u32) -> Self {
+        Self {
+            id,
+            mesh_index,
+            render_layer,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -240,16 +393,35 @@ impl Default for LightComponent {
     }
 }
 
+#[derive(Component, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrefabRef {
+    pub path: String,
+}
+
+impl Default for PrefabRef {
+    fn default() -> Self {
+        Self {
+            path: String::new(),
+        }
+    }
+}
+
 // --- Tags & Gameplay Markers ---
 
 #[derive(Component, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EntityName(pub String);
 
-#[derive(Component, Debug, Clone, Copy, Default)]
+#[derive(Component, Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct Static;
 
-#[derive(Component, Debug, Clone, Copy, Default)]
+#[derive(Component, Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct Dynamic;
 
-#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct SceneEntity;
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SceneEntity(pub bool);
+
+impl Default for SceneEntity {
+    fn default() -> Self {
+        Self(true)
+    }
+}

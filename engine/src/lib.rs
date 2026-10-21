@@ -2,6 +2,9 @@ pub mod app;
 pub mod camera;
 pub mod game;
 pub mod physics;
+pub mod scene;
+
+pub use scene::SceneManager;
 
 use std::sync::Arc;
 use tokio::runtime::Runtime;
@@ -42,6 +45,8 @@ pub struct EngineRunner<A: Application> {
     pub app: A,
     pub config: EngineConfig,
 
+    pub scene_manager: SceneManager,
+
     pub egui_state: Option<egui_winit::State>,
     pub egui_ctx: egui::Context,
 
@@ -56,6 +61,9 @@ pub struct EngineRunner<A: Application> {
     pub game_input: GameInput,
     pub last_cursor_pos: Option<(f64, f64)>,
     pub world_snapshot: Option<Vec<u8>>,
+
+    pub physics_accumulator: f32,
+    pub fixed_timestep: f32,
 
     pub camera: Camera,
     pub camera_controller: CameraController,
@@ -80,9 +88,10 @@ impl<A: Application> EngineRunner<A> {
             }
             self.play_state = PlayState::Playing;
 
+            self.physics_accumulator = 0.0;
             self.physics.clear();
             self.physics.sync_from_ecs(&self.world);
-            self.game_plugin.on_start(&self.world);
+            self.game_plugin.on_start(&self.world, &mut self.physics);
             log::info!("[ENGINE] Game started (Play Mode). Snapshot saved.");
         }
     }
@@ -94,9 +103,10 @@ impl<A: Application> EngineRunner<A> {
             }
             self.play_state = PlayState::Simulating;
 
+            self.physics_accumulator = 0.0;
             self.physics.clear();
             self.physics.sync_from_ecs(&self.world);
-            self.game_plugin.on_start(&self.world);
+            self.game_plugin.on_start(&self.world, &mut self.physics);
             log::info!("[ENGINE] Simulation started (Simulate Mode). Snapshot saved.");
         }
     }
@@ -105,6 +115,7 @@ impl<A: Application> EngineRunner<A> {
         if self.play_state != PlayState::Editing {
             self.game_plugin.on_stop(&self.world);
             self.physics.clear();
+            self.physics_accumulator = 0.0;
 
             if let Some(bytes) = &self.world_snapshot {
                 if let Err(e) = self.world.restore_snapshot(bytes) {
@@ -132,6 +143,7 @@ impl<A: Application> EngineRunner<A> {
                 } else {
                     PlayState::Playing
                 };
+                self.physics_accumulator = 0.0;
                 log::info!("[ENGINE] Resumed.");
             }
             PlayState::Editing => {}
@@ -214,6 +226,54 @@ impl<A: Application> EngineRunner<A> {
             }
         });
     }
+
+    pub fn execute_load_scene(&mut self, path: &std::path::Path) -> anyhow::Result<()> {
+        log::info!("[ENGINE] Loading scene: {:?}", path);
+
+        let path_str = path.to_string_lossy();
+
+        if self.play_state == PlayState::Playing || self.play_state == PlayState::Simulating {
+            self.game_plugin.on_stop(&self.world);
+        }
+
+        self.physics.clear();
+        self.physics_accumulator = 0.0;
+
+        ecs::serialization::load_world(&mut self.world, &path_str)?;
+
+        let mut models_in_scene = Vec::new();
+        self.world.each_model(|_, model_comp| {
+            models_in_scene.push(model_comp.id.path());
+        });
+        models_in_scene.dedup();
+
+        for model_path in models_in_scene {
+            self.load_model_async(&model_path);
+        }
+
+        self.physics.sync_from_ecs(&self.world);
+
+        if self.play_state == PlayState::Playing || self.play_state == PlayState::Simulating {
+            self.game_plugin.on_start(&self.world, &mut self.physics);
+        }
+
+        self.scene_manager.current_scene_path = Some(path.to_path_buf());
+        self.scene_manager.is_dirty = false;
+
+        log::info!("[ENGINE] Scene loaded successfully: {:?}", path);
+        Ok(())
+    }
+
+    pub fn execute_new_scene(&mut self) {
+        if self.play_state == PlayState::Playing || self.play_state == PlayState::Simulating {
+            self.game_plugin.on_stop(&self.world);
+        }
+        self.physics.clear();
+        self.world.clear_scene();
+        self.scene_manager.current_scene_path = None;
+        self.scene_manager.is_dirty = false;
+        log::info!("[ENGINE] Created new empty scene.");
+    }
 }
 
 impl<A: Application> ApplicationHandler for EngineRunner<A> {
@@ -221,8 +281,20 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
         event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
 
         if self.window.is_none() {
+            let icon_bytes = include_bytes!("../res/icon.png");
+            let image_decoded = image::load_from_memory(icon_bytes)
+                .expect("Failed to decode icon")
+                .into_rgba8();
+
+            let (icon_width, icon_height) = image_decoded.dimensions();
+            let icon_rgba = image_decoded.into_raw();
+
+            let window_icon = winit::window::Icon::from_rgba(icon_rgba, icon_width, icon_height)
+                .expect("Failed to create window icon");
+
             let window_attributes = Window::default_attributes()
                 .with_title(self.config.window_title.clone())
+                .with_window_icon(Some(window_icon))
                 .with_inner_size(winit::dpi::LogicalSize::new(
                     self.config.window_width,
                     self.config.window_height,
@@ -353,6 +425,7 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                 &mut self.world,
                 &mut self.camera,
                 &mut self.camera_controller,
+                &mut self.scene_manager,
                 &event,
             ) {
                 return;
@@ -362,21 +435,23 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
         match event {
             WindowEvent::RedrawRequested => {
                 let now = std::time::Instant::now();
-                self.metrics.frame_time_ms =
+                let instant_frame_time =
                     now.duration_since(self.last_frame_time).as_secs_f32() * 1000.0;
                 self.last_frame_time = now;
                 self.frames_this_second += 1;
 
-                let dt = self.metrics.frame_time_ms / 1000.0;
+                self.metrics.frame_time_ms = if self.metrics.frame_time_ms == 0.0 {
+                    instant_frame_time
+                } else {
+                    self.metrics.frame_time_ms * 0.9 + instant_frame_time * 0.1
+                };
+
+                let dt = (instant_frame_time / 1000.0).clamp(0.0001, 0.1);
 
                 if now.duration_since(self.last_fps_update).as_secs_f32() >= 1.0 {
                     self.metrics.fps = self.frames_this_second as f32;
                     self.frames_this_second = 0;
                     self.last_fps_update = now;
-                }
-
-                if let Some(window) = &self.window {
-                    window.request_redraw();
                 }
 
                 let mut reloads: Vec<String> = Vec::new();
@@ -407,39 +482,146 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                     self.load_model_async(&name);
                 }
 
+                match std::mem::replace(&mut self.scene_manager.pending_transition, scene::SceneTransition::None) {
+                    scene::SceneTransition::Load(path) => {
+                        if let Err(e) = self.execute_load_scene(&path) {
+                            log::error!("Failed to transition to scene {:?}: {e}", path);
+                        }
+                    }
+                    scene::SceneTransition::NewScene => {
+                        self.execute_new_scene();
+                    }
+                    scene::SceneTransition::None => {}
+                }
+
                 match self.play_state {
                     PlayState::Playing => {
-                        self.physics.sync_from_ecs(&self.world);
-                        self.physics.step(dt);
-                        self.physics.sync_to_ecs(&self.world);
+                        let frame_clamped = dt.min(0.05);
+                        self.physics_accumulator += frame_clamped;
 
-                        self.game_plugin.on_update(&self.world, &self.game_input, dt);
+                        let max_substeps = 3;
+                        let mut steps = 0;
+
+                        while self.physics_accumulator >= self.fixed_timestep && steps < max_substeps {
+                            self.physics.sync_from_ecs(&self.world);
+                            self.physics.step(self.fixed_timestep);
+                            self.physics.sync_to_ecs(&self.world);
+
+                            for event in self.physics.collision_events() {
+                                self.game_plugin.on_collision(&self.world, event);
+                            }
+
+                            self.game_plugin.on_fixed_update(
+                                &self.world,
+                                &mut self.physics,
+                                &self.game_input,
+                                self.fixed_timestep,
+                            );
+
+                            self.physics_accumulator -= self.fixed_timestep;
+                            steps += 1;
+                        }
+
+                        if steps == max_substeps {
+                            self.physics_accumulator = 0.0;
+                        }
+
+                        self.game_plugin.on_update(
+                            &self.world,
+                            &mut self.physics,
+                            &self.game_input,
+                            dt,
+                        );
                         self.world.progress();
+
+                        self.game_plugin.on_late_update(
+                            &self.world,
+                            &mut self.physics,
+                            &self.game_input,
+                            dt,
+                        );
+
                         self.game_input.clear_frame_deltas();
                     }
                     PlayState::Simulating => {
-                        self.physics.sync_from_ecs(&self.world);
-                        self.physics.step(dt);
-                        self.physics.sync_to_ecs(&self.world);
+                        let frame_clamped = dt.min(0.05);
+                        self.physics_accumulator += frame_clamped;
 
                         let dummy_input = GameInput::default();
-                        self.game_plugin.on_update(&self.world, &dummy_input, dt);
+                        let max_substeps = 3;
+                        let mut steps = 0;
+
+                        while self.physics_accumulator >= self.fixed_timestep && steps < max_substeps {
+                            self.physics.sync_from_ecs(&self.world);
+                            self.physics.step(self.fixed_timestep);
+                            self.physics.sync_to_ecs(&self.world);
+
+                            self.game_plugin.on_fixed_update(
+                                &self.world,
+                                &mut self.physics,
+                                &dummy_input,
+                                self.fixed_timestep,
+                            );
+
+                            self.physics_accumulator -= self.fixed_timestep;
+                            steps += 1;
+                        }
+
+                        if steps == max_substeps {
+                            self.physics_accumulator = 0.0;
+                        }
+
+                        self.game_plugin.on_update(
+                            &self.world,
+                            &mut self.physics,
+                            &dummy_input,
+                            dt,
+                        );
                         self.world.progress();
+
+                        self.game_plugin.on_late_update(
+                            &self.world,
+                            &mut self.physics,
+                            &dummy_input,
+                            dt,
+                        );
+
                         self.game_input.clear_frame_deltas();
                     }
                     PlayState::Paused { ref mut step_frame, was_simulating } => {
                         if *step_frame {
-                            self.physics.sync_from_ecs(&self.world);
-                            self.physics.step(dt);
-                            self.physics.sync_to_ecs(&self.world);
-
                             let input = if was_simulating {
                                 GameInput::default()
                             } else {
                                 self.game_input.clone()
                             };
-                            self.game_plugin.on_update(&self.world, &input, dt);
+
+                            self.physics.sync_from_ecs(&self.world);
+                            self.physics.step(self.fixed_timestep);
+                            self.physics.sync_to_ecs(&self.world);
+
+                            self.game_plugin.on_fixed_update(
+                                &self.world,
+                                &mut self.physics,
+                                &input,
+                                self.fixed_timestep,
+                            );
+
+                            self.game_plugin.on_update(
+                                &self.world,
+                                &mut self.physics,
+                                &input,
+                                self.fixed_timestep,
+                            );
                             self.world.progress();
+
+                            self.game_plugin.on_late_update(
+                                &self.world,
+                                &mut self.physics,
+                                &input,
+                                self.fixed_timestep,
+                            );
+
                             self.game_input.clear_frame_deltas();
                             *step_frame = false;
                         }
@@ -451,6 +633,11 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                     .on_update(&mut self.world, &mut self.camera, &mut self.camera_controller);
 
                 self.world.update_transforms();
+
+                let alpha = (self.physics_accumulator / self.fixed_timestep).clamp(0.0, 1.0);
+                if self.play_state == PlayState::Playing || self.play_state == PlayState::Simulating {
+                    self.physics.update_render_transforms(&self.world, alpha);
+                }
 
                 self.camera_controller.update_camera(&mut self.camera, dt);
 
@@ -507,6 +694,7 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                         &mut load_requests,
                         self.play_state,
                         &self.asset_server,
+                        &mut self.scene_manager,
                         viewport_texture_id,
                         &mut desired_viewport_size,
                     );
@@ -642,6 +830,36 @@ impl<A: Application> ApplicationHandler for EngineRunner<A> {
                 self.metrics.draw_calls = draw_calls;
 
                 if let Some(renderer) = &mut self.renderer {
+                    if let Some(entity_id) = self.app.selected_entity() {
+                        if let Some(model_mat) = self.world.get_global_transform(entity_id) {
+                            let mut need_update = true;
+                            
+                            if let Some(ref current) = renderer.selected_outline {
+                                if current.model_matrix == model_mat {
+                                    need_update = false;
+                                }
+                            }
+
+                            if need_update {
+                                self.world.get_model(entity_id, |model| {
+                                    if let Some(asset_model) = self.asset_server.get::<render::model::Model>(model.id) {
+                                        renderer.set_selected_outline(
+                                            asset_model.clone(),
+                                            model.mesh_index,
+                                            model_mat,
+                                        );
+                                    }
+                                });
+                            }
+                        } else {
+                            renderer.clear_selected_outline();
+                        }
+                    } else if renderer.selected_outline.is_some() {
+                        renderer.clear_selected_outline();
+                    }
+                }
+
+                if let Some(renderer) = &mut self.renderer {
                     if let Err(e) = renderer.render_batches(
                         &camera_uniform,
                         &render_data,
@@ -703,6 +921,8 @@ pub fn run<A: Application>(
         app,
         config,
 
+        scene_manager: SceneManager::new(),
+
         egui_state,
         egui_ctx,
 
@@ -717,6 +937,9 @@ pub fn run<A: Application>(
         game_input: GameInput::default(),
         last_cursor_pos: None,
         world_snapshot: None,
+
+        physics_accumulator: 0.0,
+        fixed_timestep: 1.0 / 60.0,
 
         camera,
         camera_controller,
